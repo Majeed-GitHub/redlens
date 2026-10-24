@@ -1,0 +1,8 @@
+{
+  "version": "redlens-heldout-v1",
+  "seed": 99991,
+  "cases": 250,
+  "files": {
+    "attacks.jsonl": "2c7047e053149311e1fea1b7a7b41a8c925415c325e69c506e30a4095daa5578"
+  }
+}

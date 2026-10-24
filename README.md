@@ -1,6 +1,6 @@
 # RedLens
 
-[![Tests: 130 passing](https://img.shields.io/badge/tests-130%20passing-brightgreen.svg)](tests)
+[![Tests: 169 passing](https://img.shields.io/badge/tests-169%20passing-brightgreen.svg)](tests)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Python 3.9+](https://img.shields.io/badge/python-3.9%2B-blue.svg)](pyproject.toml)
 [![Dependencies: none](https://img.shields.io/badge/dependencies-0-brightgreen.svg)](pyproject.toml)
@@ -138,6 +138,7 @@ Each boundary is a layer, and the layer changes the verdict, not only the messag
 | tool_definition | MCP and function-calling schemas | tool-poisoning rules, long-description and URL notes |
 | tool_call | the arguments of one call | secret paths, traversal, nested commands, policy; capped at review by design |
 | output | what the model is about to return | canaries, leaks, exfiltration, code sinks |
+| error_output | tool and API error messages | instruction smuggling in error paths, upgraded like other passive layers |
 
 The upgrade matters: an instruction the user typed is a user problem, the same instruction
 arriving inside a retrieved document is an attack on the agent.
@@ -220,6 +221,25 @@ The reachable-pair question - tool A reads files, tool B sends network traffic -
 not flagged. Almost every real toolset contains that pair, and a check that fires on every
 toolset is a check nobody reads. Only combinations inside a single tool are reported.
 
+## Runtime controls, not just scanning
+
+- **Error-path injection.** tool and API error messages are their own boundary: RL-601 to RL-605
+  catch instructions smuggled through failures and recovery steps.
+- **Manifest drift.** python -m redlens manifest --file new.json --baseline old.json reports a
+  tool that appeared (RL-409) or a tool that gained a capability (RL-410).
+- **Agent bill of materials.** python -m redlens agbom --file tools.json emits CycloneDX-shaped
+  JSON: every tool, its capabilities, a hash each, and a serial derived from the toolset.
+- **Runtime least privilege.** Policy grants say what an agent may call at all; a clean call
+  outside its grant is still refused with POL-GRANT.
+- **Standards crosswalk.** python -m redlens crosswalk maps every rule to its OWASP LLM Top 10
+  entry and NIST AI RMF function, and declares the standards it refuses to map because the
+  documents were not obtained.
+- **SIEM export.** python -m redlens log --file audit.jsonl --format cef verifies the chain first
+  and refuses to export a log that fails.
+- **Gateway.** examples/llm_gateway.py covers model calls that never touch MCP.
+
+Details, including what is deliberately absent, are in docs/platform.md.
+
 ## The self-improvement loop
 
 A hand-written rule pack stops improving when its author does. This closes the loop: generate
@@ -268,7 +288,7 @@ The gap is the price of the respelled views: a 4 KB input is scanned as raw, NFK
 decoded, rot13, leetspeak, reversed, flattened and letterspaced text. A literal pre-filter skips
 57 of the 112 input rules (62 of all 123 rules) on layers that cannot contain their keywords, and
 it is only applied where it provably cannot cause a miss: any pattern with an alternation branch
-holding no word of four letters or more is always run.
+holding no word of four letters or more is always run. 117 input rules, 63 across every rule set, 58 of them pre-filtered.
 
 ## Scoring
 
@@ -309,6 +329,11 @@ RedLens corpus evaluation
 
 CI fails the build if recall drops below 95% or if any benign sample is flagged.
 
+That 100 percent is on the corpus this pack was tuned against, and quoting only it would be
+misleading. The held-out corpus - 250 mutated attacks generated from a seed no development run
+used, and which redlens evolve refuses to seed from - measures **93.6 percent**. That gap is the
+honest generalisation number, and it is the one to quote.
+
 ## What it does not do
 
 RedLens is a fast deterministic filter, not a guarantee.
@@ -330,7 +355,7 @@ actions, and output-side checks.
 
 ```
 redlens/
-  rules.py        112 input rules, plus cross-turn signals, output rules and structural findings
+  rules.py        117 input rules, plus cross-turn signals, output rules and structural findings
   detectors.py    normalisation, decoding, respelled views, literal pre-filter, layered scanning
   scanner.py      scoring, per-layer thresholds, kill switches, layer helpers
   session.py      bounded conversation window and cross-turn detection

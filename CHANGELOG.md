@@ -2,6 +2,29 @@
 
 All notable changes. One line per change, in the commit that made it.
 
+## 0.7.0 - runtime controls, and a held-out number
+
+- Error-path injection is its own passive layer (error_output) with rules RL-601
+  to RL-605: instructions in error text, recovery steps that smuggle a command,
+  retry payloads, suggested debug affordances, and stack traces carrying orders.
+- Manifest drift: redlens manifest --baseline reports a tool that appeared
+  (RL-409) and a tool that gained a capability (RL-410).
+- redlens agbom: a CycloneDX-shaped agent bill of materials with per-tool hashes
+  and a capability inventory.
+- Runtime least privilege: policy grants name the tools an agent may call at all,
+  and an ungranted tool is refused with POL-GRANT even when the call is clean.
+- redlens crosswalk: every rule mapped to its OWASP LLM Top 10 entry and NIST AI
+  RMF function. OWASP Agentic and AIUC-1 are declared not mapped, with the reason,
+  because neither document could be obtained.
+- redlens log --format cef: SIEM export that verifies the hash chain first and
+  refuses to emit an edited log without --force.
+- examples/llm_gateway.py: a stdlib gateway in front of any OpenAI-compatible
+  endpoint, scanning the request and the response.
+- benchmarks/redlens-heldout-v1: 250 mutated attacks from a seed no development
+  run used. redlens evolve refuses to seed from it. Measured recall on it is 93.6
+  percent, against 100 percent on the tuned corpus.
+- 169 tests.
+
 ## 0.6.0 - the closed loop
 
 - redlens/evolution: generate attacks by mutation, measure the pack against them,

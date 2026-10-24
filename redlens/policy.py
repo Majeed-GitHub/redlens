@@ -151,9 +151,23 @@ class Policy:
             return cls(json.load(handle))
 
     # ------------------------------------------------------------------ eval
-    def evaluate(self, tool_name: str, arguments: Optional[Dict[str, Any]] = None) -> PolicyDecision:
+    def evaluate(self, tool_name: str, arguments: Optional[Dict[str, Any]] = None,
+                 agent: Optional[str] = None) -> PolicyDecision:
         arguments = arguments or {}
         name = tool_name or ""
+
+        # Runtime least privilege. A grant is what this agent, in this session, is
+        # allowed to call at all. A tool that is absent from the grant list is out
+        # of bounds even when the call itself is clean.
+        grants = self.document.get("grants")
+        if isinstance(grants, dict) and agent:
+            allowed = grants.get(agent)
+            if allowed is None:
+                return PolicyDecision(ACTION_DENY, "POL-GRANT",
+                                      "agent %s has no grant in this policy" % agent)
+            if name not in allowed:
+                return PolicyDecision(ACTION_DENY, "POL-GRANT",
+                                      "agent %s is not granted the tool %s" % (agent, name))
 
         for rule in self.rules:
             if _matches_when(rule.get("when") or {}, name, arguments):

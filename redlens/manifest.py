@@ -123,6 +123,83 @@ def _levenshtein(a: str, b: str) -> int:
     return previous[-1]
 
 
+def canonical_manifest(tools: Sequence[Dict[str, Any]]) -> Dict[str, Dict[str, Any]]:
+    """Name -> {description, schema, capabilities} for diffing two snapshots."""
+    snapshot: Dict[str, Dict[str, Any]] = {}
+    for tool in tools or []:
+        if not isinstance(tool, dict):
+            continue
+        name, description, schema = _tool_parts(tool)
+        if not name:
+            continue
+        snapshot[name] = {
+            "description": description,
+            "schema": schema,
+            "capabilities": _capabilities(name, schema),
+        }
+    return snapshot
+
+
+def diff_manifests(before: Sequence[Dict[str, Any]], after: Sequence[Dict[str, Any]]) -> Report:
+    """What changed between two manifests, and what it now lets the agent do.
+
+    A toolset is a moving target: a server that legitimately read files last week
+    can add network egress this week without anyone noticing. This reports the
+    drift, so the change is a decision rather than a surprise.
+    """
+    old = canonical_manifest(before)
+    new = canonical_manifest(after)
+    findings: List[Finding] = []
+    notes: List[str] = []
+
+    for name in sorted(set(new) - set(old)):
+        gained = [tag for tag, present in new[name]["capabilities"].items() if present]
+        severity = "high" if any(tag in ("cred_access", "net_egress", "exec") for tag in gained) else "medium"
+        findings.append(Finding(
+            rule_id="RL-409", category="manifest_anomaly", severity=severity,
+            description="Tool %s is new in this manifest and holds %s." % (name, ", ".join(gained) or "no notable capability"),
+            evidence="new tool: " + name, span=(0, 0), owasp="LLM03:2025 Supply Chain",
+            layer=LAYER_TOOL_DEFINITION, rule_severity=severity,
+        ))
+
+    for name in sorted(set(old) & set(new)):
+        gained = [tag for tag, present in new[name]["capabilities"].items()
+                  if present and not old[name]["capabilities"].get(tag)]
+        if gained:
+            findings.append(Finding(
+                rule_id="RL-410", category="manifest_anomaly", severity="high",
+                description="Tool %s gained %s since the baseline manifest." % (name, ", ".join(sorted(gained))),
+                evidence="capability drift: " + name, span=(0, 0), owasp="LLM03:2025 Supply Chain",
+                layer=LAYER_TOOL_DEFINITION, rule_severity="high",
+            ))
+        if old[name]["description"] != new[name]["description"]:
+            notes.append("description of %s changed since the baseline." % name)
+            if len(new[name]["description"]) > len(old[name]["description"]):
+                notes.append("  %s grew by %d characters: review for smuggling."
+                             % (name, len(new[name]["description"]) - len(old[name]["description"])))
+
+    for name in sorted(set(old) - set(new)):
+        notes.append("tool %s was removed since the baseline." % name)
+
+    for name, body in new.items():
+        missing = [key for key in ("version", "server", "source", "signature") if key not in body and key not in new]
+        if not new.get(name, {}).get("schema"):
+            notes.append("tool %s published no input schema; its capabilities cannot be audited." % name)
+
+    score, extra = score_findings(findings)
+    notes.extend(extra)
+    notes.append("compared %d baseline tool(s) with %d current tool(s)." % (len(old), len(new)))
+    return Report(
+        target="manifest-diff",
+        layer=LAYER_TOOL_DEFINITION,
+        text_length=0,
+        findings=findings,
+        score=score,
+        decision=decide(score, findings, LAYER_TOOL_DEFINITION),
+        notes=notes,
+    )
+
+
 def scan_tool_manifest(tools: Sequence[Dict[str, Any]], target: str = "manifest") -> Report:
     """Analyse a whole toolset, not one tool description at a time."""
     findings: List[Finding] = []

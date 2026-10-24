@@ -24,7 +24,7 @@ from .scanner import (
 from .session import ScanSession, detect_crypto_context_injection
 from .tool_call import scan_tool_call
 
-__version__ = "0.6.0"
+__version__ = "0.7.0"
 
 __all__ = [
     "CCI_SIGNALS",

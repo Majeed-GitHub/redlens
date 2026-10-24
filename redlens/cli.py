@@ -253,7 +253,18 @@ def cmd_manifest(args) -> int:
     if not isinstance(tools, list):
         print("manifest must be a JSON array of tools, or an object with a tools array", file=sys.stderr)
         return EXIT_ERROR
-    report = scan_tool_manifest(tools)
+    if getattr(args, "baseline", None):
+        from .manifest import diff_manifests
+        try:
+            with open(args.baseline, "r", encoding="utf-8", errors="replace") as handle:
+                previous = json.load(handle)
+        except (OSError, ValueError) as exc:
+            print("cannot read baseline %s: %s" % (args.baseline, exc), file=sys.stderr)
+            return EXIT_ERROR
+        previous_tools = previous.get("tools") if isinstance(previous, dict) else previous
+        report = diff_manifests(previous_tools or [], tools)
+    else:
+        report = scan_tool_manifest(tools)
     if args.json:
         print(report.to_json(indent=2))
     else:
@@ -450,7 +461,7 @@ def cmd_policy(args) -> int:
     except (OSError, ValueError) as exc:
         print("cannot load policy or arguments: %s" % exc, file=sys.stderr)
         return EXIT_ERROR
-    decision = policy.evaluate(args.tool, arguments)
+    decision = policy.evaluate(args.tool, arguments, agent=getattr(args, "agent", None))
     if args.json:
         print(json.dumps(decision.to_dict(), indent=2))
     else:
@@ -472,6 +483,9 @@ def cmd_verify_log(args) -> int:
 def cmd_evolve(args) -> int:
     """Run the self-improvement loop against the frozen corpus."""
     corpus_dir = args.corpus_dir or CORPUS_DIR
+    if "heldout" in corpus_dir.replace(chr(92), "/").lower():
+        print("refusing to evolve from the held-out corpus: it must stay unseen", file=sys.stderr)
+        return EXIT_ERROR
     seeds = _load_jsonl(os.path.join(corpus_dir, "attacks.jsonl"))
     benign = _load_jsonl(os.path.join(corpus_dir, "benign.jsonl"))
     benign += _load_jsonl(os.path.join(corpus_dir, "benign_hard.jsonl"))
@@ -512,6 +526,73 @@ def cmd_evolve(args) -> int:
             print("    accepted %s  %s" % (rule["id"], rule["pattern"]))
         if args.out:
             print("  report written to : %s" % args.out)
+    return EXIT_CLEAN
+
+
+def _load_manifest_payload(args):
+    """Read a tool manifest from --file, or from stdin when --file is a dash."""
+    try:
+        if args.file == "-":
+            payload = json.load(sys.stdin)
+        else:
+            with open(args.file, "r", encoding="utf-8", errors="replace") as handle:
+                payload = json.load(handle)
+    except (OSError, ValueError) as exc:
+        print("cannot read manifest %s: %s" % (args.file, exc), file=sys.stderr)
+        return None
+    return payload.get("tools") if isinstance(payload, dict) else payload
+
+
+def cmd_agbom(args) -> int:
+    """Emit an agent bill of materials for a tool manifest."""
+    from .agbom import build_agbom, summarize
+    payload = _load_manifest_payload(args)
+    if payload is None:
+        return EXIT_ERROR
+    bom = build_agbom(payload, agent=args.agent or "unnamed-agent", server=args.server or args.file or "unknown")
+    if args.out:
+        with open(args.out, "w", encoding="utf-8") as handle:
+            json.dump(bom, handle, indent=2)
+    if args.json:
+        print(json.dumps(bom, indent=2))
+    else:
+        print(summarize(bom))
+    return EXIT_CLEAN
+
+
+def cmd_crosswalk(args) -> int:
+    """Print the standard-mapping crosswalk for the rule pack."""
+    from .crosswalk import build_crosswalk, summarize_crosswalk
+    crosswalk = build_crosswalk()
+    if args.out:
+        with open(args.out, "w", encoding="utf-8") as handle:
+            json.dump(crosswalk, handle, indent=2)
+    if args.json:
+        print(json.dumps(crosswalk, indent=2))
+    else:
+        print(summarize_crosswalk(crosswalk))
+    return EXIT_CLEAN
+
+
+def cmd_log(args) -> int:
+    """Export a chained audit log for a SIEM, and verify it on the way out."""
+    from .audit_log import read_records, verify
+    ok, first_bad, count, message = verify(args.file)
+    if not ok and not args.force:
+        print("refusing to export a log that fails verification: %s (record %s)" % (message, first_bad), file=sys.stderr)
+        return EXIT_FINDINGS
+    records = read_records(args.file)
+    if args.format == "cef":
+        for record in records:
+            severity = {"deny": 8, "review": 5, "allow": 2}.get(str(record.get("decision")), 3)
+            print("CEF:0|RedLens|RedLens|%s|%s|%s|%d|tool=%s rules=%s args=%s seq=%d" % (
+                __version__, record.get("event", "event"), record.get("event", "event"), severity,
+                record.get("tool", "-"), ",".join(record.get("rules", []) or []) or "-",
+                ",".join(record.get("arguments", []) or []) or "-", record.get("seq", 0)))
+    else:
+        for record in records:
+            print(json.dumps(record, ensure_ascii=False))
+    print("exported %d verified record(s)" % count, file=sys.stderr)
     return EXIT_CLEAN
 
 
@@ -557,6 +638,7 @@ def build_parser() -> argparse.ArgumentParser:
     manifest_parser.add_argument("--file", "-f", help="read the manifest JSON from this file")
     manifest_parser.add_argument("--stdin", action="store_true")
     manifest_parser.add_argument("--json", action="store_true")
+    manifest_parser.add_argument("--baseline", help="an earlier manifest, to report capability drift")
     manifest_parser.add_argument("--fail-on", choices=sorted(FAIL_ON_LEVELS))
     manifest_parser.set_defaults(func=cmd_manifest)
 
@@ -579,12 +661,32 @@ def build_parser() -> argparse.ArgumentParser:
     policy_parser.add_argument("--file", "-f", required=True, help="the policy JSON file")
     policy_parser.add_argument("--tool", required=True)
     policy_parser.add_argument("--args", help="the arguments as a JSON object")
+    policy_parser.add_argument("--agent", help="agent identity, for runtime grant checks")
     policy_parser.add_argument("--json", action="store_true")
     policy_parser.set_defaults(func=cmd_policy)
 
     verify_parser = sub.add_parser("verify-log", help="verify a chained audit log")
     verify_parser.add_argument("--file", "-f", required=True)
     verify_parser.set_defaults(func=cmd_verify_log)
+
+    agbom_parser = sub.add_parser("agbom", help="emit an agent bill of materials for a tool manifest")
+    agbom_parser.add_argument("--file", "-f", required=True)
+    agbom_parser.add_argument("--agent", help="agent identity this bill of materials describes")
+    agbom_parser.add_argument("--server", help="the MCP server or tool host the tools came from")
+    agbom_parser.add_argument("--out", help="write the AgBOM JSON here")
+    agbom_parser.add_argument("--json", action="store_true")
+    agbom_parser.set_defaults(func=cmd_agbom)
+
+    crosswalk_parser = sub.add_parser("crosswalk", help="map the rule pack to the standards it can cite")
+    crosswalk_parser.add_argument("--out", help="write the crosswalk JSON here")
+    crosswalk_parser.add_argument("--json", action="store_true")
+    crosswalk_parser.set_defaults(func=cmd_crosswalk)
+
+    log_parser = sub.add_parser("log", help="export a chained audit log for a SIEM")
+    log_parser.add_argument("--file", "-f", required=True)
+    log_parser.add_argument("--format", choices=["jsonl", "cef"], default="jsonl")
+    log_parser.add_argument("--force", action="store_true", help="export even if verification failed")
+    log_parser.set_defaults(func=cmd_log)
 
     evolve_parser = sub.add_parser("evolve", help="generate attacks, propose rules, accept only what measurably wins")
     evolve_parser.add_argument("--corpus-dir", help="frozen corpus to seed and gate against")
