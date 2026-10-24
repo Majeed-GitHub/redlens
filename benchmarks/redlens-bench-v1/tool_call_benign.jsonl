@@ -1,0 +1,8 @@
+{"id":"TCB-01","tool":"read_file","arguments":{"path":"./src/app.py"},"why":"in-scope relative path"}
+{"id":"TCB-02","tool":"fetch_page","arguments":{"url":"https://docs.python.org/3/library/re.html"},"why":"documentation tool given an ordinary URL"}
+{"id":"TCB-03","tool":"run_tests","arguments":{"fixture":"tests/fixtures/sample.json"},"why":"test harness passing a fixture path"}
+{"id":"TCB-04","tool":"build","arguments":{"cwd":"$(pwd)"},"why":"build tool given a shell-substitution style cwd"}
+{"id":"TCB-05","tool":"lint","arguments":{"pattern":"src/**/*.py"},"why":"linter given a glob"}
+{"id":"TCB-06","tool":"read_file","arguments":{"path":"docs/configuration.md"},"why":"documentation file path"}
+{"id":"TCB-07","tool":"http_request","arguments":{"url":"https://api.example.com/v1/items","method":"GET"},"why":"ordinary API call"}
+{"id":"TCB-08","tool":"search","arguments":{"query":"how to rotate SSH keys safely"},"why":"searching for security documentation"}

@@ -150,6 +150,11 @@ _CSS_HIDDEN_BLOCK = re.compile(
 _DATA_URI_BLOB = re.compile(r"data:[a-z0-9.+-]+/[a-z0-9.+-]+(?:;base64)?,([A-Za-z0-9+/=%]+)")
 
 
+def _decode_tag_characters(text: str) -> str:
+    """Tag characters carry their payload in the U+E0000 offset."""
+    return "".join(chr(ord(ch) - 0xE0000) for ch in text if 0xE0000 <= ord(ch) <= 0xE007F)
+
+
 def hidden_text(text: str) -> str:
     """Everything a reader would not see, but a model would.
 
@@ -160,6 +165,9 @@ def hidden_text(text: str) -> str:
     if not text:
         return ""
     pieces: List[str] = []
+    smuggled = _decode_tag_characters(text)
+    if smuggled.strip():
+        pieces.append(smuggled)
     pieces.extend(_HTML_COMMENT.findall(text))
     pieces.extend(match.group(1) for match in _MD_REF_DEF.finditer(text))
     pieces.extend(_MD_ALT_TEXT.findall(text))

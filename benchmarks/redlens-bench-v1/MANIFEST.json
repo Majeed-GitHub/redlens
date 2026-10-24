@@ -1,0 +1,18 @@
+{
+  "version": "redlens-bench-v1",
+  "files": {
+    "attacks.jsonl": "eae58ad762124720a27d0a447c82d45eadd10bff55727e7abd95cbcbfae71878",
+    "benign.jsonl": "7d3381ab5726ac15fbbbdd07ddac970a72edca0182235c16bea2d6bb710ffc39",
+    "benign_hard.jsonl": "8672975204f14a1e0c01678fff3702614f317290b35cd6ceea0f8d087de92a0d",
+    "tool_call_attacks.jsonl": "21d1b5b86ede9eb7883aaac6cb13a5c9f81b88a7419c626900141a557818d755",
+    "tool_call_benign.jsonl": "e3f5b22b66e9770db5e9a1fe446438dd8fb2188c19ccc6ac5870b3b90aa3a39a"
+  },
+  "counts": {
+    "attacks.jsonl": 205,
+    "benign.jsonl": 61,
+    "benign_hard.jsonl": 46,
+    "tool_call_attacks.jsonl": 8,
+    "tool_call_benign.jsonl": 8
+  },
+  "license": "CC-BY-4.0"
+}
