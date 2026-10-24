@@ -1,0 +1,10 @@
+build/
+dist/
+*.egg-info/
+__pycache__/
+*.pyc
+.venv/
+.pytest_cache/
+redlens-report.json
+_smoke.py
+test-output.txt
