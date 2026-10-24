@@ -9,6 +9,7 @@ over every layer and reports which layer matched.
 from __future__ import annotations
 
 import base64
+import codecs
 import binascii
 import math
 import re
@@ -34,6 +35,13 @@ _B64_BLOB = re.compile(r"[A-Za-z0-9+/]{16,}={0,2}")
 _PERCENT_ESC = re.compile(r"%[0-9A-Fa-f]{2}")
 _HEX_ESC = re.compile(r"\\x[0-9a-fA-F]{2}")
 _OPAQUE_TOKEN = re.compile(r"[A-Za-z0-9+/=_-]{40,}")
+_ROLE_MARKER = re.compile(r"^\s*(?:user|human|assistant|system)\s*[:>]", re.IGNORECASE | re.MULTILINE)
+_PUNCTUATION = re.compile(r"[^a-z0-9\s]+")
+_SPACED_LETTERS = re.compile(r"(?:\b[a-zA-Z]\s+){3,}[a-zA-Z]\b")
+_LEET_TABLE = str.maketrans({
+    "0": "o", "1": "i", "3": "e", "4": "a", "5": "s", "7": "t",
+    "8": "b", "9": "g", "@": "a", "$": "s", "|": "l",
+})
 
 LAYER_DIRECT = "direct"
 LAYER_RETRIEVED = "retrieved"
@@ -105,6 +113,32 @@ def normalize(text: str) -> str:
     return deconfuse(unicodedata.normalize("NFKC", strip_invisibles(text)))
 
 
+def deleetspeak(text: str) -> str:
+    """Fold common leetspeak substitutions back to letters."""
+    return text.translate(_LEET_TABLE)
+
+
+def flatten(text: str) -> str:
+    """Lowercase and strip punctuation so i.g.n.o.r.e still reads as ignore."""
+    return _PUNCTUATION.sub("", text.lower())
+
+
+def join_spaced_letters(text: str) -> str:
+    """Rebuild words written one letter at a time, keeping the word boundaries.
+
+    "i g n o r e   a l l" becomes "ignore   all", so the rule pack sees the real
+    phrase while the wider gaps that separate words are preserved.
+    """
+    rebuilt = []
+    for chunk in re.split(r"(\s{2,})", text):
+        parts = chunk.split()
+        if len(parts) >= 2 and all(len(part) == 1 and part.isalpha() for part in parts):
+            rebuilt.append("".join(parts))
+        else:
+            rebuilt.append(chunk)
+    return "".join(rebuilt)
+
+
 def printable_ratio(text: str) -> float:
     if not text:
         return 0.0
@@ -164,14 +198,34 @@ def decoded_variants(text: str, max_variants: int = 24) -> List[Tuple[str, str]]
     return unique
 
 
+def transformed_views(text: str) -> List[Tuple[str, str]]:
+    """Views that undo an attacker's spelling tricks rather than an encoding."""
+    views: List[Tuple[str, str]] = []
+    seen = {text}
+
+    def add(label: str, value: str) -> None:
+        if value and value not in seen:
+            seen.add(value)
+            views.append((label, value))
+
+    add("rot13", codecs.decode(text, "rot13"))
+    add("leetspeak", deleetspeak(text))
+    add("reversed", text[::-1])
+    add("flattened", flatten(text))
+    add("letterspaced", join_spaced_letters(text))
+    return views
+
+
 def normalized_layers(text: str) -> List[Tuple[str, str]]:
-    """Every view of the input the engine scans: raw, normalized, decoded."""
+    """Every view of the input the engine scans: raw, normalised, decoded, respelled."""
     layers: List[Tuple[str, str]] = [("raw", text)]
     normalized = normalize(text)
     if normalized != text:
         layers.append(("normalized", normalized))
     for label, decoded in decoded_variants(text):
         layers.append(("decoded:" + label, normalize(decoded)))
+    for label, transformed in transformed_views(text):
+        layers.append((label, normalize(transformed)))
     return layers
 
 
@@ -204,19 +258,24 @@ def scan_text(
     findings: List[Finding] = []
     seen = set()
 
+    # Layers are ordered from least to most obfuscated: raw, normalized, decoded,
+    # then respelled. The first view that matches a rule wins, so a plain hit is
+    # never duplicated and inflated by a respelled view of the same text.
     for layer_name, layer_text in normalized_layers(text):
         if not layer_text:
             continue
         for rule in active:
+            key = (rule.id, layer)
+            if key in seen:
+                continue
             match = compiled(rule).search(layer_text)
             if not match:
                 continue
             decoded_via = None
             if layer_name.startswith("decoded:"):
                 decoded_via = layer_name.split(":", 1)[1]
-            key = (rule.id, decoded_via, layer)
-            if key in seen:
-                continue
+            elif layer_name not in ("raw", "normalized"):
+                decoded_via = layer_name
             seen.add(key)
 
             severity = rule.severity

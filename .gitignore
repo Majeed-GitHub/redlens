@@ -8,3 +8,4 @@ __pycache__/
 redlens-report.json
 _smoke.py
 test-output.txt
+_scratch/

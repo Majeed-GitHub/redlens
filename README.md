@@ -45,13 +45,16 @@ It is written for the two places injection actually hurts:
 | agent_tool_abuse | forced dangerous tool calls, privilege escalation, shell pipes | medium - critical |
 | indirect_injection | instructions hidden in retrieved or tool content | medium - critical |
 | tool_poisoning | poisoned MCP and function-calling tool descriptions | high - critical |
-| encoding_evasion | base64, percent, hex, zero-width, bidi, homoglyph, tag characters | low - critical |
+| encoding_evasion | base64, percent, hex, rot13, leetspeak, reversed text, spaced letters, fullwidth, zero-width, bidi, homoglyph, tag characters | low - critical |
+| data_exfiltration | markdown image and HTML beacons, data URIs | high |
+| many_shot | long runs of fake conversation turns, repeated-line priming | high |
+| (multilingual) | the same override and leak families in Arabic, Hindi, Russian, Chinese, Spanish, French and German | high - critical |
 
 Run the live count:
 
 ```
 $ redlens rules
-RedLens rule pack: 57 rules
+RedLens rule pack: 112 rules
 ```
 
 ## Install and use as a library
@@ -115,9 +118,9 @@ rather than claimed:
 ```
 $ redlens eval
 RedLens corpus evaluation
-  attacks          : 65
-  detected         : 65 (recall 100.0%)
-  benign samples   : 26
+  attacks          : 198
+  detected         : 198 (recall 100.0%)
+  benign samples   : 61
   false positives  : 0 (rate 0.0%)
 ```
 
@@ -134,7 +137,7 @@ tool scopes, human approval for destructive actions, and output-side checks.
 
 ```
 redlens/
-  rules.py        57 rules across 9 categories
+  rules.py        112 rules across 11 categories
   detectors.py    normalisation, decoding, layered scanning
   scanner.py      scoring, decisions, layer helpers
   cli.py          scan / eval / rules commands

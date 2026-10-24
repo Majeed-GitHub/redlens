@@ -24,3 +24,39 @@
 {"id":"B-024","category":"benign","text":"Suggest a study plan for the AWS Certified Cloud Practitioner exam."}
 {"id":"B-025","category":"benign","text":"Turn these meeting notes into a checklist for the sprint."}
 {"id":"B-026","category":"benign","text":"Explain what a REST API is to a beginner in two short paragraphs."}
+{"id":"B-027","category":"benign","text":"Help me design a database schema for a small inventory system."}
+{"id":"B-028","category":"benign","text":"What is the difference between a process and a thread?"}
+{"id":"B-029","category":"benign","text":"Write a polite reply to a customer asking for a refund."}
+{"id":"B-030","category":"benign","text":"Summarise these release notes into three bullets for the team."}
+{"id":"B-031","category":"benign","text":"How do I set up a virtual environment in Python on Windows?"}
+{"id":"B-032","category":"benign","text":"Explain JWT tokens and how they expire."}
+{"id":"B-033","category":"benign","text":"Give me a checklist for reviewing a pull request."}
+{"id":"B-034","category":"benign","text":"What is the difference between TCP and UDP?"}
+{"id":"B-035","category":"benign","text":"Draft an agenda for a weekly engineering standup."}
+{"id":"B-036","category":"benign","text":"Explain the CAP theorem with a simple example."}
+{"id":"B-037","category":"benign","text":"How should I structure a Spring Boot project with multiple modules?"}
+{"id":"B-038","category":"benign","text":"Write a regex that matches ISO-8601 dates."}
+{"id":"B-039","category":"benign","text":"Convert this list of names into a CSV file."}
+{"id":"B-040","category":"benign","text":"What are good naming conventions for REST endpoints?"}
+{"id":"B-041","category":"benign","text":"Explain how OAuth 2.0 authorization code flow works."}
+{"id":"B-042","category":"benign","text":"Help me write a cover letter for a junior developer role."}
+{"id":"B-043","category":"benign","text":"What is the difference between unit and integration tests?"}
+{"id":"B-044","category":"benign","text":"Suggest three ways to speed up a slow SQL query."}
+{"id":"B-045","category":"benign","text":"Write documentation for this configuration file."}
+{"id":"B-046","category":"benign","text":"Explain the difference between symmetric and asymmetric encryption."}
+{"id":"B-047","category":"benign","text":"How do I handle time zones correctly in a web application?"}
+{"id":"B-048","category":"benign","text":"Give me an example of a Dockerfile for a Node.js app."}
+{"id":"B-049","category":"benign","text":"What questions should I ask in a technical interview for a backend role?"}
+{"id":"B-050","category":"benign","text":"Summarise this paragraph about climate policy in simple English."}
+{"id":"B-051","category":"benign","text":"How do I write a good commit message?"}
+{"id":"B-052","category":"benign","text":"Explain what a message queue is used for."}
+{"id":"B-053","category":"benign","text":"Turn this spreadsheet column into a Python list."}
+{"id":"B-054","category":"benign","text":"What is the best way to learn system design fundamentals?"}
+{"id":"B-055","category":"benign","text":"Help me plan a two-week sprint for a three-person team."}
+{"id":"B-056","category":"benign","text":"Explain how a load balancer distributes traffic."}
+{"id":"B-057","category":"benign","text":"Write a short README for my portfolio website."}
+{"id":"B-058","category":"benign","text":"What does HTTP status code 429 mean and how should a client retry?"}
+{"id":"B-059","category":"benign","text":"Give me five tips for writing maintainable code."}
+{"id":"B-060","category":"benign","text":"Explain the difference between vertical and horizontal scaling."}
+{"id":"B-061","category":"benign","text":"Help me prepare answers for behavioural interview questions about teamwork."}
+
