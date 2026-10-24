@@ -24,6 +24,18 @@ DECISION_BLOCK = "block"
 REVIEW_AT = 25
 BLOCK_AT = 55
 
+# Content the user never typed gets a lower review bar: it only has to look
+# suspicious, because nobody is watching it arrive.
+REVIEW_THRESHOLDS = {
+    "direct": 25,
+    "retrieved": 18,
+    "tool_output": 18,
+    "tool_definition": 15,
+    "output": 25,
+    "session": 18,
+}
+KILL_SWITCH_BUDGET = 12
+
 RISKY_COMBINATIONS = (
     ("instruction_override", "system_exfiltration"),
     ("instruction_override", "agent_tool_abuse"),
@@ -47,6 +59,10 @@ class Report:
     @property
     def categories(self) -> List[str]:
         return sorted({f.category for f in self.findings})
+
+    @property
+    def kill_switch_hit(self) -> bool:
+        return any(f.kill_switch for f in self.findings)
 
     @property
     def max_severity(self) -> Optional[str]:
@@ -97,9 +113,10 @@ def score_findings(findings: Sequence[Finding]) -> tuple:
 
     notes: List[str] = []
     categories = {f.category for f in findings}
-    if len(categories) >= 3:
-        score += 10
-        notes.append("Multiple attack categories in one input (%s): layered attempt." % ", ".join(sorted(categories)))
+    if len(categories) >= 2:
+        score += 5 * (len(categories) - 1)
+        notes.append("%d attack categories in one input (%s): layered attempt." % (
+            len(categories), ", ".join(sorted(categories))))
     if any(f.decoded_via for f in findings):
         score += 10
         notes.append("Payload was obfuscated (decoded before matching): active evasion.")
@@ -112,12 +129,16 @@ def score_findings(findings: Sequence[Finding]) -> tuple:
 
 
 
-def decide(score: int, findings: Sequence[Finding]) -> str:
+def decide(score: int, findings: Sequence[Finding], layer: str = "direct") -> str:
+    # A kill-switch finding blocks on its own. That list stays tiny on purpose:
+    # redlens audit fails CI if it grows past KILL_SWITCH_BUDGET.
+    if any(f.kill_switch for f in findings):
+        return DECISION_BLOCK
     if any(f.severity == "critical" for f in findings) and score >= 40:
         return DECISION_BLOCK
     if score >= BLOCK_AT:
         return DECISION_BLOCK
-    if score >= REVIEW_AT:
+    if score >= REVIEW_THRESHOLDS.get(layer, REVIEW_AT):
         return DECISION_REVIEW
     if findings:
         return DECISION_ALLOW
@@ -139,7 +160,7 @@ def scan(
         text_length=len(text or ""),
         findings=findings,
         score=score,
-        decision=decide(score, findings),
+        decision=decide(score, findings, layer),
         notes=notes,
     )
 

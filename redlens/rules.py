@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
-from typing import List
+from typing import Dict, List, Optional, Tuple
 
 SEVERITY_WEIGHTS = {"low": 8, "medium": 20, "high": 40, "critical": 65}
 
@@ -29,6 +29,19 @@ class Rule:
     description: str
     owasp: str = "LLM01:2025 Prompt Injection"
     regex_flags: int = re.IGNORECASE
+    # A rule fires only when no negative pattern matches the same text. Every
+    # false positive you fix should leave one here, so it can never come back.
+    negative_patterns: Tuple[str, ...] = ()
+    # Rule ids reported as one co-occurrence finding by the session and manifest
+    # detectors rather than by the regex engine.
+    requires: Tuple[str, ...] = ()
+    # Kill-switch rules block regardless of score. Keep this list tiny.
+    kill_switch: bool = False
+    ttl: Optional[str] = None
+    source: str = "core"
+    atlas: Optional[str] = None
+    # Corpus case ids that must keep hitting this rule; asserted by redlens audit.
+    tests: Tuple[str, ...] = ()
 
 
 RULES: List[Rule] = [
@@ -138,22 +151,28 @@ RULES: List[Rule] = [
          r"(?:use|call|invoke|run)\s+(?:the\s+)?(?:tool|function|api)\s+[\"']?\w*(?:delete|drop|transfer|exec|shell|admin|write_file)",
          "Coerces a dangerous tool call from untrusted input."),
     Rule("RL-051", "agent_tool_abuse", "high",
-         r"(?:escalate|elevate|grant|give)\s+(?:me\s+|your\s+|my\s+|the\s+|full\s+|admin\s+|own\s+|session\s+)*(?:privileges?|permissions?|access|role|admin\s+rights)",
+         r"(?:(?:escalate|elevate)\s+(?:your\s+|my\s+|the\s+)?(?:privileges?|permissions?|access|role|admin\s+rights)|(?:grant|give)\s+(?:me|yourself|your\s+(?:own\s+)?(?:session|account)|my\s+own)\b[^.\n]{0,30}?(?:privileges?|permissions?|access|role|admin\s+rights)|(?:grant|give)\s+(?:full|admin|root|elevated|unrestricted)\s+(?:access|privileges?|permissions?|rights))",
          "Privilege-escalation request aimed at an agent."),
     Rule("RL-052", "agent_tool_abuse", "critical",
          r"(?:rm\s+-rf\s+/|curl\s+[^\s|]{4,}\s*\|\s*(?:ba|z)?sh|wget\s+[^\s|]{4,}\s*\|\s*(?:ba|z)?sh|chmod\s+777)",
          "Destructive or remote-pipe shell command in untrusted content."),
     Rule("RL-053", "agent_tool_abuse", "high",
          r"(?:exfiltrate|send|post|upload|forward)\s+(?:the\s+|your\s+|my\s+)?(?:contents?\s+of\s+(?:the\s+)?)?(?:api[\s_-]?keys?|tokens?|secrets?|credentials?|passwords?|env(?:ironment)?\s+variables?|\.env)",
-         "Credential exfiltration instruction."),
+         "Credential exfiltration instruction.",
+         negative_patterns=(
+             r"(?:rotation|rotat|reminder|polic(?:y|ies)|runbook|documentation|documented|backup\s+plan)",
+         )),
     Rule("RL-054", "agent_tool_abuse", "medium",
          r"\b(?:id_rsa|\.aws/credentials|\.env|ssh\s+(?:private\s+)?key)\b",
          "Sensitive local secret store referenced by untrusted content."),
     Rule("RL-055", "agent_tool_abuse", "high",
          r"(?:base64\s+-d|--decode|eval\(|exec\(|subprocess\.|os\.system\()",
-         "Code-execution primitive in untrusted content."),
+         "Code-execution primitive in untrusted content.",
+         negative_patterns=(
+             r"(?:is\s+a\s+bug|we\s+must\s+fix|the\s+fix\s+is|vulnerabilit|do\s+not\s+use|avoid\s+using|static\s+analysis|code\s+review|flagged)",
+         )),
     Rule("RL-056", "agent_tool_abuse", "critical",
-         r"(?:delete|drop|truncate|wipe)\s+(?:all\s+)?(?:the\s+)?(?:\w+\s+){0,2}(?:files?|database|tables?|records?|repositor(?:y|ies)|bucket|logs?)",
+         r"(?:(?:delete|drop|truncate|wipe)\s+(?:all|every|entire|the\s+entire)\s+(?:the\s+)?(?:files?|database|tables?|records?|repositor(?:y|ies)|bucket|logs?)|(?:drop|truncate)\s+(?:the\s+)?\w*\s*(?:tables?|databases?|schemas?)\b)",
          "Mass-destruction instruction."),
     Rule("RL-057", "agent_tool_abuse", "high",
          r"(?:you\s+(?:now\s+)?have|you\s+are\s+granted)\s+(?:full\s+)?(?:admin|root|write)\s+(?:access|privileges?)",
@@ -349,9 +368,12 @@ RULES: List[Rule] = [
          "Direct request for the system prompt."),
     Rule("RL-147", "system_exfiltration", "high",
          r"(?:state|list|recite|quote|enumerate)\s+(?:your|all|every|the)\s+(?:guidelines?|rules?|instructions?|prompt|directives?)",
-         "Asks the model to enumerate its rules."),
+         "Asks the model to enumerate its rules.",
+         negative_patterns=(
+             r"(?:in\s+the\s+(?:guide|docs?|documentation|readme|page|file|manual)|setup\s+guide|from\s+the\s+file)",
+         )),
     Rule("RL-148", "system_exfiltration", "high",
-         r"(?:return|output|dump|export|print)\s+your\s+(?:configuration|config|settings|environment|system\s+prompt)\s+as\b",
+         r"(?:return|output|dump|export|print)\s+your\s+(?:configuration|config|settings|environment|system\s+prompt)\s+as\s+(?:yaml|json|xml|csv|base64|text|markdown|a\s+string)",
          "Requests the model configuration in a machine-readable form."),
     Rule("RL-149", "system_exfiltration", "high",
          r"(?:echo|repeat|print|output)\s+the\s+(?:preamble|preface|introduction|setup|initial\s+message)\b",
@@ -361,7 +383,10 @@ RULES: List[Rule] = [
          "Asks for every instruction the model was given."),
     Rule("RL-151", "system_exfiltration", "high",
          r"quote\s+it\s+exactly",
-         "Requests a verbatim quote of the instructions."),
+         "Requests a verbatim quote of the instructions.",
+         negative_patterns=(
+             r"(?:contract|agreement|clause|specification|as\s+it\s+appears|in\s+the\s+document)",
+         )),
     Rule("RL-152", "system_exfiltration", "high",
          r"repeat\s+your\s+[^.\n]{0,24}verbatim",
          "Verbatim repetition request aimed at the prompt."),
@@ -403,3 +428,93 @@ def get_rule(rule_id: str):
         if rule.id == rule_id:
             return rule
     return None
+
+
+# ---------------------------------------------------------------------------
+# Cross-turn signal rules.
+#
+# Each is deliberately low or medium on its own: a lone encoded blob or a lone
+# "this is a test" is not an attack. The session detector raises the kill-switch
+# finding only when several signal classes co-occur inside the window, which is
+# what makes the cross-turn view both useful and quiet.
+# ---------------------------------------------------------------------------
+
+CCI_SIGNALS: List[Rule] = [
+    Rule("RL-201", "crypto_context_injection", "low",
+         r"[A-Za-z0-9+/]{250,}={0,2}",
+         "Very long encoded blob: possible encrypted payload."),
+    Rule("RL-202", "crypto_context_injection", "low",
+         r"(?:-----BEGIN [A-Z ]*PRIVATE KEY-----|\b(?:decryption|decrypt|secret|private|session)\s+key\b|\bkey\s*[:=]\s*[A-Za-z0-9+/]{16,})",
+         "Key material inside the conversation window."),
+    Rule("RL-203", "crypto_context_injection", "medium",
+         r"(?:openssl\s+enc\s+-d|gpg\s+--decrypt|aes-\d{3}-[a-z]+|decrypt\s+(?:this|the|it)|decode\s+then\s+(?:run|execute|obey)|use\s+the\s+key\s+to)",
+         "Decryptor intent."),
+    Rule("RL-204", "crypto_context_injection", "medium",
+         r"(?:run\s+the\s+decoded|execute\s+the\s+decoded|follow\s+the\s+decoded|do\s+what\s+the\s+decoded|obey\s+the\s+decoded|then\s+do\s+what\s+it\s+says)",
+         "Execution intent aimed at decoded content."),
+    Rule("RL-205", "crypto_context_injection", "low",
+         r"(?:this\s+is\s+(?:just\s+)?a\s+test|you\s+are\s+authorized|the\s+developer\s+says|for\s+internal\s+use\s+only)",
+         "Trust laundering: framing that makes a payload look sanctioned."),
+]
+
+CCI_SIGNAL_IDS: List[str] = [rule.id for rule in CCI_SIGNALS]
+
+
+# ---------------------------------------------------------------------------
+# Output-side rules. Applied by redlens.output_scan to model output, never
+# during input scanning, so they are kept out of RULES on purpose.
+# ---------------------------------------------------------------------------
+
+OUTPUT_RULES: List[Rule] = [
+    Rule("RL-302", "secret_leak", "high",
+         r"(?:sk-[A-Za-z0-9]{20,}|AKIA[0-9A-Z]{16}|gh[pousr]_[A-Za-z0-9]{20,}|xox[baprs]-[A-Za-z0-9-]{10,})",
+         "Live-looking API credential in the output."),
+    Rule("RL-303", "secret_leak", "high",
+         r"\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b",
+         "JSON Web Token in the output."),
+    Rule("RL-304", "secret_leak", "high",
+         r"-----BEGIN [A-Z ]*PRIVATE KEY-----",
+         "Private key block in the output."),
+    Rule("RL-305", "secret_leak", "medium",
+         r"^\s*[A-Z0-9_]*(?:SECRET|TOKEN|PASSWORD|API_KEY|PRIVATE_KEY)[A-Z0-9_]*\s*=\s*\S{8,}",
+         "Environment-style secret assignment in the output.",
+         regex_flags=re.IGNORECASE | re.MULTILINE),
+    Rule("RL-306", "output_exfiltration", "high",
+         r"!\[[^\]]*\]\(\s*https?://[^)\s]{10,}\)",
+         "Markdown image in the output: a data-out channel."),
+    Rule("RL-307", "code_sink", "high",
+         r"(?:\b(?:eval|exec)\s*\(|os\.system\s*\(|subprocess\.[A-Za-z_]+\([^)]*shell\s*=\s*True|child_process\.exec\s*\(|Runtime\.getRuntime\(\)\.exec|unserialize\s*\(|new\s+Function\s*\(|pickle\.loads\s*\()",
+         "Dangerous code sink in generated output."),
+]
+
+
+# Structural findings raised by the session, output and manifest detectors.
+# Kept here so ids, severities and kill-switch status live beside the regex pack.
+STRUCTURAL_RULES: Dict[str, Dict[str, object]] = {
+    "RL-210": {"category": "crypto_context_injection", "severity": "critical", "kill_switch": True,
+               "description": "Cross-turn payload: encoding, key, decryptor and execution signals co-occur inside the session window."},
+    "RL-211": {"category": "cross_turn_escalation", "severity": "medium", "kill_switch": False,
+               "description": "The same attack class was attempted across several turns of one session."},
+    "RL-301": {"category": "secret_leak", "severity": "critical", "kill_switch": True,
+               "description": "A registered canary token appeared in output: data crossed the boundary."},
+    "RL-309": {"category": "system_exfiltration", "severity": "high", "kill_switch": False,
+               "description": "Output reproduces the registered system prompt: prompt leak in progress."},
+    "RL-308": {"category": "code_sink", "severity": "critical", "kill_switch": False,
+               "description": "Generated code combines a dangerous sink with environment access and network egress."},
+    "RL-401": {"category": "manifest_anomaly", "severity": "critical", "kill_switch": True,
+               "description": "Instructions hidden in invisible characters inside tool metadata."},
+    "RL-402": {"category": "manifest_anomaly", "severity": "critical", "kill_switch": True,
+               "description": "One tool holds credential access plus network egress, or reads files while it can send them out."},
+    "RL-403": {"category": "manifest_anomaly", "severity": "high", "kill_switch": False,
+               "description": "Encoded blob in a tool example or default value."},
+    "RL-404": {"category": "manifest_anomaly", "severity": "high", "kill_switch": False,
+               "description": "Tool name and its parameters disagree about what the tool does."},
+    "RL-405": {"category": "manifest_anomaly", "severity": "medium", "kill_switch": False,
+               "description": "Tool name shadowing a well-known tool by a near-identical spelling."},
+    "RL-406": {"category": "manifest_anomaly", "severity": "medium", "kill_switch": False,
+               "description": "Open schema on a tool that also accepts execution-style parameters."},
+    "RL-407": {"category": "manifest_anomaly", "severity": "high", "kill_switch": False,
+               "description": "Instruction-like text in a parameter default or example."},
+    "RL-408": {"category": "manifest_anomaly", "severity": "medium", "kill_switch": False,
+               "description": "Enum entries written as sentences rather than values."},
+}

@@ -19,7 +19,7 @@ from collections import Counter
 from dataclasses import dataclass
 from typing import Dict, List, Optional, Sequence, Tuple
 
-from .rules import RULES, SEVERITY_ORDER, SEVERITY_WEIGHTS, Rule
+from .rules import CCI_SIGNALS, OUTPUT_RULES, RULES, SEVERITY_ORDER, SEVERITY_WEIGHTS, Rule
 
 ZERO_WIDTH = "\u200b\u200c\u200d\u2060\ufeff"
 BIDI_CONTROLS = "\u202a\u202b\u202c\u202d\u202e\u2066\u2067\u2068\u2069"
@@ -65,6 +65,7 @@ class Finding:
     layer: str = LAYER_DIRECT
     decoded_via: Optional[str] = None
     rule_severity: str = ""
+    kill_switch: bool = False
 
     def to_dict(self) -> dict:
         return {
@@ -78,6 +79,7 @@ class Finding:
             "owasp": self.owasp,
             "layer": self.layer,
             "decoded_via": self.decoded_via,
+            "kill_switch": self.kill_switch,
         }
 
     def line(self) -> str:
@@ -93,19 +95,17 @@ def bump_severity(severity: str, steps: int = 1) -> str:
     return SEVERITY_ORDER[idx]
 
 
+_HIDDEN_TABLE = {ord(ch): None for ch in ZERO_WIDTH + BIDI_CONTROLS}
+_HIDDEN_TABLE.update({code: None for code in range(0xE0000, 0xE0080)})
+_CONFUSABLE_TABLE = {ord(source): target for source, target in CONFUSABLES.items()}
+
+
 def strip_invisibles(text: str) -> str:
-    out = []
-    for ch in text:
-        if ch in ZERO_WIDTH or ch in BIDI_CONTROLS:
-            continue
-        if 0xE0000 <= ord(ch) <= 0xE007F:
-            continue
-        out.append(ch)
-    return "".join(out)
+    return text.translate(_HIDDEN_TABLE)
 
 
 def deconfuse(text: str) -> str:
-    return "".join(CONFUSABLES.get(ch, ch) for ch in text)
+    return text.translate(_CONFUSABLE_TABLE)
 
 
 def normalize(text: str) -> str:
@@ -231,6 +231,116 @@ def normalized_layers(text: str) -> List[Tuple[str, str]]:
 
 _COMPILED: Dict[str, "re.Pattern[str]"] = {}
 
+# ---------------------------------------------------------------------------
+# Literal pre-filter.
+#
+# Running every rule against every layer is the whole cost of the engine, and
+# almost all of that work is a rule looking for a word that is not there. Each
+# rule advertises the literal words it cannot match without; a layer that
+# contains none of them can skip the rule entirely.
+#
+# It is only used when it cannot cause a miss: if any alternation branch has no
+# word of four letters or more, the rule is marked always-run. A pattern like
+# (?:sk-[A-Za-z0-9]{20,}|AKIA...) is therefore never pre-filtered, because the
+# first branch could match without any of the collected words.
+# ---------------------------------------------------------------------------
+
+_MIN_LITERAL = 4
+_PRESCREEN_CACHE: Dict[str, Optional[frozenset]] = {}
+
+
+def _literal_runs(pattern: str) -> List[str]:
+    runs: List[str] = []
+    current: List[str] = []
+    in_class = False
+    index = 0
+    while index < len(pattern):
+        char = pattern[index]
+        if char == "\\":
+            if current:
+                runs.append("".join(current))
+                current = []
+            index += 2
+            continue
+        if in_class:
+            if char == "]":
+                in_class = False
+            index += 1
+            continue
+        if char == "[":
+            if current:
+                runs.append("".join(current))
+                current = []
+            in_class = True
+            index += 1
+            continue
+        if char.isalpha():
+            current.append(char)
+            index += 1
+            continue
+        if current:
+            runs.append("".join(current))
+            current = []
+        index += 1
+    if current:
+        runs.append("".join(current))
+    return [run for run in runs if len(run) >= _MIN_LITERAL]
+
+
+def _every_branch_has_a_literal(pattern: str) -> bool:
+    branches: List[str] = []
+    current: List[str] = []
+    in_class = False
+    index = 0
+    while index < len(pattern):
+        char = pattern[index]
+        if char == "\\":
+            current.append(pattern[index:index + 2])
+            index += 2
+            continue
+        if in_class:
+            current.append(char)
+            if char == "]":
+                in_class = False
+            index += 1
+            continue
+        if char == "[":
+            in_class = True
+            current.append(char)
+            index += 1
+            continue
+        if char == "|":
+            branches.append("".join(current))
+            current = []
+            index += 1
+            continue
+        current.append(char)
+        index += 1
+    branches.append("".join(current))
+    return all(_literal_runs(branch) for branch in branches)
+
+
+def prescreen_literals(rule: Rule) -> Optional[frozenset]:
+    """The words a match must contain, or None when the rule always has to run."""
+    if rule.id not in _PRESCREEN_CACHE:
+        if _every_branch_has_a_literal(rule.pattern):
+            _PRESCREEN_CACHE[rule.id] = frozenset(run.lower() for run in _literal_runs(rule.pattern))
+        else:
+            _PRESCREEN_CACHE[rule.id] = None
+    return _PRESCREEN_CACHE[rule.id]
+
+
+def _warm_prescreen_cache() -> int:
+    """Compute the pre-filter once at import, and report how many rules use it."""
+    ready = 0
+    for rule in list(RULES) + list(OUTPUT_RULES) + list(CCI_SIGNALS):
+        if prescreen_literals(rule):
+            ready += 1
+    return ready
+
+
+PRESCREENED_RULES = _warm_prescreen_cache()
+
 
 def compiled(rule: Rule):
     if rule.id not in _COMPILED:
@@ -264,9 +374,20 @@ def scan_text(
     for layer_name, layer_text in normalized_layers(text):
         if not layer_text:
             continue
+        lowered = None
         for rule in active:
             key = (rule.id, layer)
             if key in seen:
+                continue
+            needed = prescreen_literals(rule)
+            if needed is not None:
+                if lowered is None:
+                    lowered = layer_text.lower()
+                if not any(word in lowered for word in needed):
+                    continue
+            if rule.negative_patterns and any(
+                    re.search(negative, layer_text, rule.regex_flags)
+                    for negative in rule.negative_patterns):
                 continue
             match = compiled(rule).search(layer_text)
             if not match:
@@ -298,6 +419,7 @@ def scan_text(
                 layer=layer,
                 decoded_via=decoded_via,
                 rule_severity=rule.severity,
+                kill_switch=rule.kill_switch,
             ))
 
     matched_ids = {f.rule_id for f in findings}

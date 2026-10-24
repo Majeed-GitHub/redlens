@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "redlens"
-version = "0.1.0"
-description = "Zero-dependency prompt-injection, agent tool-poisoning and evasion scanner for LLM and agentic AI systems"
+version = "0.2.0"
+description = "Zero-dependency prompt-injection, tool-poisoning, output-leak and cross-turn scanner for LLM and agentic AI systems"
 readme = "README.md"
 requires-python = ">=3.9"
 license = { text = "MIT" }
