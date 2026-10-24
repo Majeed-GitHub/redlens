@@ -40,3 +40,7 @@
 {"id":"H-040","category":"benign_hard","text":"The deployment pipeline reads secrets from the vault at runtime."}
 {"id":"H-041","category":"benign_hard","text":"Show me the diff for the last commit."}
 {"id":"H-042","category":"benign_hard","text":"Write a function that decodes a base64 string from the API response."}
+{"id":"H-043","category":"benign_hard","text":"## Pricing\nStandard tiers apply.\n<!-- TODO: update the table after the pricing review -->"}
+{"id":"H-044","category":"benign_hard","text":"![Architecture diagram showing the request path from client to database](diagram.png)"}
+{"id":"H-045","category":"benign_hard","text":"## FAQ\n<details><summary>How do I reset my password?</summary>Use the link in the account settings page.</details>"}
+{"id":"H-046","category":"benign_hard","text":"<!-- Licensed under the Apache License, Version 2.0; see LICENSE for details -->"}

@@ -16,6 +16,7 @@ import sys
 from typing import List, Optional
 
 from . import __version__
+from .detectors import hidden_text
 from .manifest import scan_tool_manifest
 from .output_scan import scan_output
 from .rules import CCI_SIGNALS, OUTPUT_RULES, RULES, STRUCTURAL_RULES, by_category
@@ -30,6 +31,7 @@ from .scanner import (
     worst,
 )
 from .session import ScanSession
+from .tool_call import scan_tool_call
 
 CORPUS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "corpus")
 
@@ -60,6 +62,12 @@ def _read_input(args) -> str:
 
 def cmd_scan(args) -> int:
     text = _read_input(args)
+    if getattr(args, "explain_hidden", False):
+        extracted = hidden_text(text)
+        print("hidden regions extracted (%d bytes):" % len(extracted))
+        print(extracted if extracted.strip() else "  none")
+        print("")
+
     if getattr(args, "output", False):
         system_prompt = None
         if args.system_prompt_file:
@@ -296,6 +304,39 @@ def cmd_audit(args) -> int:
     if len(kill_switches) > KILL_SWITCH_BUDGET:
         failures.append("kill-switch budget exceeded")
 
+    # Every kill switch must name the benign input it may never fire on.
+    for rule_id in kill_switches:
+        by_id = {rule.id: rule for rule in RULES}
+        rationale = None
+        if rule_id in by_id:
+            rationale = by_id[rule_id].rationale
+        else:
+            rationale = STRUCTURAL_RULES.get(rule_id, {}).get("rationale")
+        if not rationale:
+            print("    MISSING RATIONALE: %s" % rule_id)
+            failures.append("kill switch without a rationale")
+
+    # The scope table is a promise to readers; CI checks that it exists and is complete.
+    readme_path = os.path.join(os.path.dirname(os.path.dirname(CORPUS_DIR)), "README.md")
+    required_rows = [
+        "input text", "retrieved content", "tool definition", "tool output",
+        "tool arguments", "runtime containment", "dependency supply chain",
+        "model memory", "model output semantics",
+    ]
+    try:
+        with open(readme_path, "r", encoding="utf-8", errors="replace") as handle:
+            readme_text = handle.read().lower()
+    except OSError:
+        readme_text = ""
+    if "## scope and non-goals" not in readme_text:
+        print("    MISSING: README section 'Scope and non-goals'")
+        failures.append("scope section missing")
+    missing_rows = [row for row in required_rows if row not in readme_text]
+    if missing_rows:
+        print("    MISSING SCOPE ROWS: %s" % ", ".join(missing_rows))
+        failures.append("scope table incomplete")
+    print("  scope section    : %s" % ("present and complete" if not missing_rows and "## scope and non-goals" in readme_text else "INCOMPLETE"))
+
     # A kill switch firing on any benign sample is a release blocker.
     for rule_id in kill_switches:
         if rule_hits.get(rule_id):
@@ -350,6 +391,31 @@ def cmd_audit(args) -> int:
     return EXIT_CLEAN
 
 
+def cmd_call(args) -> int:
+    """Inspect one tool call's arguments before it executes."""
+    try:
+        arguments = json.loads(args.args) if args.args else {}
+    except ValueError as exc:
+        print("arguments are not valid JSON: %s" % exc, file=sys.stderr)
+        return EXIT_ERROR
+    manifest = None
+    if args.manifest:
+        try:
+            with open(args.manifest, "r", encoding="utf-8", errors="replace") as handle:
+                manifest = json.load(handle)
+        except (OSError, ValueError) as exc:
+            print("cannot read manifest %s: %s" % (args.manifest, exc), file=sys.stderr)
+            return EXIT_ERROR
+    report = scan_tool_call(args.tool, arguments, tool_manifest=manifest)
+    if args.json:
+        print(report.to_json(indent=2))
+    else:
+        print(report.summary())
+    if args.fail_on:
+        return EXIT_FINDINGS if report.decision in FAIL_ON_LEVELS[args.fail_on] else EXIT_CLEAN
+    return EXIT_CLEAN
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="redlens",
@@ -370,6 +436,8 @@ def build_parser() -> argparse.ArgumentParser:
     scan_parser.add_argument("--canary", action="append", default=[],
                              help="a canary token to look for in output; repeatable")
     scan_parser.add_argument("--system-prompt-file", help="registered system prompt, for leak detection")
+    scan_parser.add_argument("--explain-hidden", action="store_true",
+                             help="print the text extracted from hidden regions before the report")
     scan_parser.add_argument("--target", help="label used in the report")
     scan_parser.add_argument("--json", action="store_true", help="emit JSON instead of text")
     scan_parser.add_argument("--fail-on", choices=sorted(FAIL_ON_LEVELS),
@@ -399,6 +467,14 @@ def build_parser() -> argparse.ArgumentParser:
     session_parser.add_argument("--json", action="store_true")
     session_parser.add_argument("--fail-on", choices=sorted(FAIL_ON_LEVELS))
     session_parser.set_defaults(func=cmd_session)
+
+    call_parser = sub.add_parser("call", help="inspect one tool call's arguments before it executes")
+    call_parser.add_argument("--tool", required=True, help="the tool being called")
+    call_parser.add_argument("--args", help="the arguments as a JSON object")
+    call_parser.add_argument("--manifest", help="the tool manifest, for capability tagging")
+    call_parser.add_argument("--json", action="store_true")
+    call_parser.add_argument("--fail-on", choices=sorted(FAIL_ON_LEVELS))
+    call_parser.set_defaults(func=cmd_call)
 
     audit_parser = sub.add_parser("audit", help="per-rule precision, kill-switch budget, determinism, latency")
     audit_parser.add_argument("--corpus-dir")

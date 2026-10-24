@@ -139,6 +139,45 @@ def join_spaced_letters(text: str) -> str:
     return "".join(rebuilt)
 
 
+_HTML_COMMENT = re.compile(r"<!--(.*?)-->", re.DOTALL)
+_MD_REF_DEF = re.compile(r"^\s*\[[^\]]+\]:\s*(\S.*)$", re.MULTILINE)
+_MD_ALT_TEXT = re.compile(r"!\[([^\]]+)\]")
+_DETAILS_BLOCK = re.compile(r"<details[^>]*>(.*?)</details>", re.DOTALL | re.IGNORECASE)
+_CSS_HIDDEN_BLOCK = re.compile(
+    r"<(?:span|div)[^>]*style=\"[^\"]*(?:display\s*:\s*none|visibility\s*:\s*hidden|font-size\s*:\s*0)[^\"]*\"[^>]*>(.*?)</(?:span|div)>",
+    re.DOTALL | re.IGNORECASE,
+)
+_DATA_URI_BLOB = re.compile(r"data:[a-z0-9.+-]+/[a-z0-9.+-]+(?:;base64)?,([A-Za-z0-9+/=%]+)")
+
+
+def hidden_text(text: str) -> str:
+    """Everything a reader would not see, but a model would.
+
+    Deliberately regex-only: parsing HTML properly needs a dependency, and a
+    scanner that pulls BeautifulSoup in to read a comment is not a zero-dependency
+    scanner any more.
+    """
+    if not text:
+        return ""
+    pieces: List[str] = []
+    pieces.extend(_HTML_COMMENT.findall(text))
+    pieces.extend(match.group(1) for match in _MD_REF_DEF.finditer(text))
+    pieces.extend(_MD_ALT_TEXT.findall(text))
+    pieces.extend(_DETAILS_BLOCK.findall(text))
+    pieces.extend(_CSS_HIDDEN_BLOCK.findall(text))
+    for blob in _DATA_URI_BLOB.findall(text):
+        if "base64" in text[:text.find(blob) + 1][-60:]:
+            try:
+                raw = base64.b64decode(blob + "=" * (-len(blob) % 4))
+                decoded = raw.decode("utf-8")
+                if printable_ratio(decoded) > 0.85:
+                    pieces.append(decoded)
+            except (binascii.Error, ValueError, UnicodeDecodeError):
+                continue
+    cleaned = [re.sub(r"<[^>]+>", " ", piece).strip() for piece in pieces]
+    return "\n".join(piece for piece in cleaned if piece)
+
+
 def printable_ratio(text: str) -> float:
     if not text:
         return 0.0

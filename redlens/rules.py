@@ -35,8 +35,10 @@ class Rule:
     # Rule ids reported as one co-occurrence finding by the session and manifest
     # detectors rather than by the regex engine.
     requires: Tuple[str, ...] = ()
-    # Kill-switch rules block regardless of score. Keep this list tiny.
+    # Kill-switch rules block regardless of score. Keep this list tiny, and
+    # name the benign input each one must never fire on.
     kill_switch: bool = False
+    rationale: Optional[str] = None
     ttl: Optional[str] = None
     source: str = "core"
     atlas: Optional[str] = None
@@ -492,19 +494,23 @@ OUTPUT_RULES: List[Rule] = [
 # Kept here so ids, severities and kill-switch status live beside the regex pack.
 STRUCTURAL_RULES: Dict[str, Dict[str, object]] = {
     "RL-210": {"category": "crypto_context_injection", "severity": "critical", "kill_switch": True,
-               "description": "Cross-turn payload: encoding, key, decryptor and execution signals co-occur inside the session window."},
+               "description": "Cross-turn payload: encoding, key, decryptor and execution signals co-occur inside the session window.",
+               "rationale": "A single class is never enough: the policy sentence 'the decryption key rotation policy is documented in the runbook' must stay clean, and the corpus asserts it."},
     "RL-211": {"category": "cross_turn_escalation", "severity": "medium", "kill_switch": False,
                "description": "The same attack class was attempted across several turns of one session."},
     "RL-301": {"category": "secret_leak", "severity": "critical", "kill_switch": True,
-               "description": "A registered canary token appeared in output: data crossed the boundary."},
+               "description": "A registered canary token appeared in output: data crossed the boundary.",
+               "rationale": "A canary is only matched when the caller registers it and it is at least six characters; ordinary prose cannot contain one unknowingly."},
     "RL-309": {"category": "system_exfiltration", "severity": "high", "kill_switch": False,
                "description": "Output reproduces the registered system prompt: prompt leak in progress."},
     "RL-308": {"category": "code_sink", "severity": "critical", "kill_switch": False,
                "description": "Generated code combines a dangerous sink with environment access and network egress."},
     "RL-401": {"category": "manifest_anomaly", "severity": "critical", "kill_switch": True,
-               "description": "Instructions hidden in invisible characters inside tool metadata."},
+               "description": "Instructions hidden in invisible characters inside tool metadata.",
+               "rationale": "Tag characters and zero-width runs must also contain an instruction verb; a license header comment has no imperative."},
     "RL-402": {"category": "manifest_anomaly", "severity": "critical", "kill_switch": True,
-               "description": "One tool holds credential access plus network egress, or reads files while it can send them out."},
+               "description": "One tool holds credential access plus network egress, or reads files while it can send them out.",
+               "rationale": "Only combinations inside a single tool fire; the reachable-pair case is deliberately not flagged because almost every real toolset has it."},
     "RL-403": {"category": "manifest_anomaly", "severity": "high", "kill_switch": False,
                "description": "Encoded blob in a tool example or default value."},
     "RL-404": {"category": "manifest_anomaly", "severity": "high", "kill_switch": False,
@@ -517,4 +523,14 @@ STRUCTURAL_RULES: Dict[str, Dict[str, object]] = {
                "description": "Instruction-like text in a parameter default or example."},
     "RL-408": {"category": "manifest_anomaly", "severity": "medium", "kill_switch": False,
                "description": "Enum entries written as sentences rather than values."},
+    "RL-501": {"category": "tool_call_abuse", "severity": "high", "kill_switch": False,
+               "description": "A tool argument points at a secret store: SSH keys, cloud credentials, dotfiles or a browser profile."},
+    "RL-502": {"category": "tool_call_abuse", "severity": "high", "kill_switch": False,
+               "description": "A tool argument carries a secret-shaped value: the agent is about to send a credential."},
+    "RL-503": {"category": "tool_call_abuse", "severity": "high", "kill_switch": False,
+               "description": "An exec-like tool received shell metacharacters: pipes, substitutions or chaining."},
+    "RL-504": {"category": "tool_call_abuse", "severity": "medium", "kill_switch": False,
+               "description": "A filesystem tool received a traversal or absolute path outside its declared scope."},
+    "RL-505": {"category": "tool_call_abuse", "severity": "high", "kill_switch": False,
+               "description": "A sensitive path is being handed to a tool that also has network egress."},
 }

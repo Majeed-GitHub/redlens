@@ -11,7 +11,10 @@ from .detectors import (
     LAYER_RETRIEVED,
     LAYER_TOOL_DEFINITION,
     LAYER_TOOL_OUTPUT,
+    PASSIVE_LAYERS,
     Finding,
+    bump_severity,
+    hidden_text,
     scan_text,
 )
 from .rules import SEVERITY_WEIGHTS, Rule
@@ -153,7 +156,24 @@ def scan(
 ) -> Report:
     """Scan one piece of content and return a scored verdict."""
     findings = scan_text(text or "", layer=layer, rules=rules)
-    score, notes = score_findings(findings)
+
+    # Content the reader cannot see is exactly where indirect injection hides.
+    # Extract it, scan it, and upgrade what it finds.
+    notes = []
+    if layer in PASSIVE_LAYERS:
+        hidden = hidden_text(text or "")
+        if hidden.strip():
+            seen = {finding.rule_id for finding in findings}
+            for extra in scan_text(hidden, layer=layer + "+hidden", rules=rules):
+                if extra.rule_id in seen:
+                    continue
+                extra.severity = bump_severity(extra.severity)
+                extra.description = extra.description + " (found in content hidden from the reader)"
+                findings.append(extra)
+            if any(f.layer.endswith("+hidden") for f in findings):
+                notes.append("hidden content was extracted and scanned: visible and hidden views differ.")
+
+    score, extra_score_notes = score_findings(findings)
     return Report(
         target=target,
         layer=layer,
@@ -161,7 +181,7 @@ def scan(
         findings=findings,
         score=score,
         decision=decide(score, findings, layer),
-        notes=notes,
+        notes=notes + extra_score_notes,
     )
 
 

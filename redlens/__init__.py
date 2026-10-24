@@ -20,8 +20,9 @@ from .scanner import (
     scan_tool_output,
 )
 from .session import ScanSession, detect_crypto_context_injection
+from .tool_call import scan_tool_call
 
-__version__ = "0.2.0"
+__version__ = "0.3.0"
 
 __all__ = [
     "CCI_SIGNALS",
@@ -41,6 +42,7 @@ __all__ = [
     "scan_retrieved",
     "scan_text",
     "scan_tool_definition",
+    "scan_tool_call",
     "scan_tool_manifest",
     "scan_tool_output",
     "__version__",
