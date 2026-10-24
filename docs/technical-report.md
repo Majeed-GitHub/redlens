@@ -144,6 +144,10 @@ Latency was measured on Windows, Python 3.12.14, single core, no warm cache:
 | typical message (59 bytes) | 0.74 ms | 1.08 ms | gated at 5 ms by redlens audit |
 | 4 KB document | 31.9 ms | 52.1 ms | reported, not gated |
 
+Latency in this report comes from tools/ablations.py on an otherwise idle machine. redlens
+audit, which runs alongside other work, prints a wider range: 0.7 to 2.0 ms p50 for a typical
+message and 30 to 47 ms p50 for a 4 KB document. Capacity planning should use the range.
+
 Determinism: scanning the same input twice produces byte-identical JSON. This is asserted in
 redlens audit on every run. Latency figures move by a few percent between runs; the detection
 counts in section 5 do not.

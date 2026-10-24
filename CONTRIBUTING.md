@@ -4,8 +4,8 @@ The hard-negative loop is the product. A rule without a hard negative is an opin
 
 ## Rule admission bar
 
-A pull request that adds or changes a rule must contain all of the following. The PR template
-blocks merge until every box is checked.
+A pull request that adds or changes a rule must contain all of the following. The PR template at
+.github/pull_request_template.md asks for it; reviewers block merge until every box is checked.
 
 1. An attack case in benchmarks/redlens-bench-v1/attacks.jsonl that the rule catches.
 2. A hard negative in benchmarks/redlens-bench-v1/benign_hard.jsonl that the rule must NOT catch,
@@ -19,6 +19,10 @@ blocks merge until every box is checked.
        python -m redlens audit
 
 5. A CHANGELOG line.
+
+The audit latency gate is a regression detector, not a millisecond certificate: the reference
+machine printed 1.4 to 5.0 ms p99 for a typical message across runs, so the budget is 12 ms.
+If you see a failure far above that, it is a real regression.
 
 ## Kill switches
 

@@ -37,11 +37,32 @@ ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)
 if ROOT not in sys.path:
     sys.path.insert(0, ROOT)
 
-from redlens import scan_tool_call, scan_tool_manifest  # noqa: E402
+from redlens import AuditLog, Policy, combine, scan_tool_call, scan_tool_manifest  # noqa: E402
 
 ERROR_BLOCKED = -32000
 ERROR_MANIFEST = -32001
 DEFAULT_DENY_AT = "review"
+
+
+def split_server_command(server):
+    """Split a --server command line without losing quoted paths or backslashes.
+
+    shlex in posix mode eats backslashes, which breaks Windows paths; in non-posix
+    mode it leaves the quotes on the token, which breaks paths with spaces. So:
+    split non-posix, then strip one matching pair of surrounding quotes per token.
+    On Windows a .cmd or .bat shim (npx.cmd, for example) cannot be executed
+    directly by Popen, so it goes through cmd /c.
+    """
+    tokens = shlex.split(server, posix=False)
+    cleaned = [
+        token[1:-1] if len(token) >= 2 and token[0] == token[-1] and token[0] in "\"'" else token
+        for token in tokens
+    ]
+    if not cleaned:
+        raise SystemExit("--server is empty")
+    if os.name == "nt" and cleaned[0].lower().endswith((".cmd", ".bat")):
+        return ["cmd", "/c"] + cleaned
+    return cleaned
 
 
 def _load_manifest(result):
@@ -54,11 +75,16 @@ def _load_manifest(result):
 
 
 class Proxy:
-    def __init__(self, server_cmd, mode="monitor", deny_at=DEFAULT_DENY_AT, log_path=None):
+    def __init__(self, server_cmd, mode="monitor", deny_at=DEFAULT_DENY_AT, log_path=None, policy_path=None):
         self.server_cmd = server_cmd
         self.mode = mode
         self.deny_at = deny_at
         self.log_path = log_path
+        self.policy = Policy.load(policy_path) if policy_path else None
+        self.log = AuditLog(log_path) if log_path else None
+        # The manifest the server published, kept so an argument can be judged
+        # against the capabilities of the tool it is being handed to.
+        self.manifest = None
         self.pending = {}
         self.write_lock = threading.Lock()
         self.audit_lock = threading.Lock()
@@ -68,14 +94,12 @@ class Proxy:
     def audit(self, event, **fields):
         record = {"ts": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()), "event": event}
         record.update(fields)
-        line = json.dumps(record, ensure_ascii=False)
-        if self.log_path:
-            with self.audit_lock:
-                with open(self.log_path, "a", encoding="utf-8") as handle:
-                    handle.write(line + "\n")
-        else:
-            sys.stderr.write(line + "\n")
-            sys.stderr.flush()
+        with self.audit_lock:
+            if self.log is not None:
+                self.log.append(event, **fields)
+            else:
+                sys.stderr.write(json.dumps(record, ensure_ascii=False) + "\n")
+                sys.stderr.flush()
 
     def emit(self, message):
         with self.write_lock:
@@ -102,15 +126,35 @@ class Proxy:
         params = message.get("params") or {}
         name = params.get("name") or ""
         arguments = params.get("arguments") or {}
-        report = scan_tool_call(name, arguments)
+        report = scan_tool_call(name, arguments, tool_manifest=self.manifest)
+        policy_decision = self.policy.evaluate(name, arguments) if self.policy else None
+        final_action = combine(policy_decision.action, report.decision) if policy_decision else None
+
+        rule_ids = sorted({finding.rule_id for finding in report.findings})
+        argument_names = sorted(str(key) for key in arguments.keys())
+
+        if policy_decision and self.mode == "enforce" and final_action == "deny":
+            self.counters["denied"] += 1
+            self.audit("tool_call_denied", tool=name, score=report.score, decision=final_action,
+                       policy=policy_decision.rule_id, policy_reason=policy_decision.reason,
+                       rules=rule_ids, arguments=argument_names)
+            self.emit(self.error(request_id, ERROR_BLOCKED,
+                                 "blocked by policy: %s" % policy_decision.reason,
+                                 {"tool": name, "policy": policy_decision.to_dict(),
+                                  "findings": [f.to_dict() for f in report.findings]}))
+            return None
+
+        if policy_decision and policy_decision.action != "allow":
+            self.audit("tool_call_flagged", tool=name, score=report.score, decision=final_action,
+                       policy=policy_decision.rule_id, policy_reason=policy_decision.reason)
 
         if report.decision == "clean" or (self.mode == "monitor"):
             self.counters["allowed"] += 1
-            if report.findings:
-                self.audit("tool_call_flagged", tool=name, score=report.score,
-                           decision=report.decision,
-                           rules=[finding.rule_id for finding in report.findings],
-                           evidence=[finding.evidence for finding in report.findings][:3])
+            # One record per decision, allow or not, so the log is a complete
+            # record rather than a list of alerts.
+            self.audit("tool_call_flagged" if report.findings else "tool_call_allowed",
+                       tool=name, score=report.score, decision=report.decision,
+                       rules=rule_ids, arguments=argument_names)
             return json.dumps(message, ensure_ascii=False)
 
         if self.deny_at == "review" and report.decision == "review":
@@ -121,8 +165,7 @@ class Proxy:
 
         self.counters["denied"] += 1
         self.audit("tool_call_denied", tool=name, score=report.score,
-                   decision=report.decision,
-                   rules=[finding.rule_id for finding in report.findings])
+                   decision=report.decision, rules=rule_ids, arguments=argument_names)
         self.emit(self.error(
             request_id, ERROR_BLOCKED,
             "blocked by redlens: %s" % ", ".join(sorted({f.rule_id for f in report.findings})),
@@ -140,6 +183,7 @@ class Proxy:
             return json.dumps(message, ensure_ascii=False)
 
         tools = _load_manifest(message.get("result"))
+        self.manifest = {"tools": tools}
         report = scan_tool_manifest(tools)
         if not report.findings:
             self.audit("manifest_clean", tools=len(tools))
@@ -212,14 +256,16 @@ def main(argv=None):
     parser.add_argument("--deny-at", choices=["review", "block"], default=DEFAULT_DENY_AT,
                         help="which decision refuses a tool call in enforce mode")
     parser.add_argument("--log", help="append audit records to this file instead of stderr")
+    parser.add_argument("--policy", help="policy JSON file: what this agent is allowed to do")
     args = parser.parse_args(argv)
 
-    command = shlex.split(args.server, posix=(os.name != "nt"))
+    command = split_server_command(args.server)
     server = subprocess.Popen(
         command, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
         text=True, bufsize=1,
     )
-    proxy = Proxy(args.server, mode=args.mode, deny_at=args.deny_at, log_path=args.log)
+    proxy = Proxy(args.server, mode=args.mode, deny_at=args.deny_at, log_path=args.log,
+                  policy_path=args.policy)
     try:
         proxy.run(server.stdin, server.stdout)
     finally:

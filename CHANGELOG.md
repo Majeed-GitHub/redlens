@@ -2,6 +2,25 @@
 
 All notable changes. One line per change, in the commit that made it.
 
+## 0.5.0 - policy and a tamper-evident record
+
+- redlens/policy.py: a JSON policy for what an agent is allowed to do - path roots,
+  host allowlists, required confirmation, tool globs - evaluated before a call
+  runs, and combined with the scanner so the stricter answer wins.
+- redlens/audit_log.py: a hash-chained audit log. Every record commits to the
+  previous one, so editing any earlier line is reported at its sequence number.
+  redlens verify-log walks the chain.
+- The MCP proxy takes --policy, keeps the manifest it read and hands it to the
+  argument scanner (so a secret path given to an egress-capable tool is caught),
+  and writes one record per decision with rule ids and argument names, never
+  argument values.
+- redlens eval now measures the tool-call corpus too.
+- Fixes from an independent docs review: the proxy command works on Windows
+  (cmd /c for .cmd shims, quote-safe splitting), the audit latency gate is a
+  12 ms regression budget rather than a flaky 5 ms, and every stale number,
+  example and claim in the README, integration guide and proxy guide was
+  corrected against real output.
+
 ## 0.4.0 - deployable, not just importable
 
 - examples/mcp_proxy: a stdlib-only stdio proxy that scans every tool manifest
@@ -46,7 +65,7 @@ All notable changes. One line per change, in the commit that made it.
 - Per-layer review thresholds, category-diversity bonus, kill-switch class.
 - 42 hard negatives; six real false positives found and fixed.
 - audit: precision, kill-switch budget, determinism, latency.
-- Literal pre-filter for 63 of 112 rules.
+- Literal pre-filter for 57 of the 112 input rules.
 
 ## 0.1.0 - first release
 

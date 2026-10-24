@@ -11,6 +11,14 @@ actually ship, because it needs no changes to the agent.
 
 ## Use it
 
+    # offline, against the server this repository ships:
+    python examples/mcp_proxy/proxy.py \
+        --server "python examples/mcp_proxy/fake_server.py" \
+        --mode monitor \
+        --log audit.jsonl
+
+    # a real server. On Windows npx resolves to npx.cmd, and the proxy launches
+    # .cmd shims through cmd /c, so the quoting below works as written:
     python examples/mcp_proxy/proxy.py \
         --server "npx -y @modelcontextprotocol/server-filesystem /tmp" \
         --mode enforce \
@@ -53,16 +61,25 @@ before anyone has read its findings, gets removed on day two.
 - **tools/call requests**: the arguments. Secret paths, secret-shaped values,
   traversal, nested shell commands, and a secret path handed to a tool with
   network egress.
-- Each decision appends one JSON line to the audit log: timestamp, event, tool,
-  score, decision, rule ids, and the evidence strings.
+- Every decision appends one JSON line to the audit log, including the allowed ones, so the log
+  is a complete record rather than a list of alerts. A record carries the timestamp, event, tool
+  name, score, decision, the rule ids that fired, and the argument names involved. It never
+  carries argument values: the log must not become the place secrets are collected, and the
+  scanner's own evidence strings can contain them. Records are hash-chained, so redlens verify-log
+  reports the exact position of any later edit.
 
 ## The audit line is the point
 
 An incident review needs a record of what the agent was told and what it tried.
-The proxy writes that record even in monitor mode:
+The proxy writes that record even in monitor mode, where nothing is refused:
 
-    {"ts":"2026-10-24T18:02:11Z","event":"tool_call_denied","tool":"read_file",
-     "score":40,"decision":"review","rules":["RL-501"]}
+    {"seq":7,"ts":"2026-10-24T18:02:11Z","event":"tool_call_flagged","tool":"read_file",
+     "score":40,"decision":"review","rules":["RL-501"],"arguments":["path"],
+     "prev":"...","hash":"..."}
+
+Check the log for tampering after an incident:
+
+    python -m redlens verify-log --file audit.jsonl
 
 ## Limits
 

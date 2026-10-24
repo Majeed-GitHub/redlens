@@ -2,7 +2,9 @@
 
 from .detectors import Finding, normalized_layers, scan_text
 from .manifest import scan_tool_manifest
+from .audit_log import AuditLog, verify as verify_audit_log
 from .output_scan import scan_output
+from .policy import Policy, PolicyDecision, combine, load_policy
 from .rules import (
     CCI_SIGNALS,
     OUTPUT_RULES,
@@ -22,7 +24,7 @@ from .scanner import (
 from .session import ScanSession, detect_crypto_context_injection
 from .tool_call import scan_tool_call
 
-__version__ = "0.4.0"
+__version__ = "0.5.0"
 
 __all__ = [
     "CCI_SIGNALS",
@@ -42,7 +44,13 @@ __all__ = [
     "scan_retrieved",
     "scan_text",
     "scan_tool_definition",
+    "AuditLog",
+    "Policy",
+    "PolicyDecision",
+    "combine",
+    "load_policy",
     "scan_tool_call",
+    "verify_audit_log",
     "scan_tool_manifest",
     "scan_tool_output",
     "__version__",

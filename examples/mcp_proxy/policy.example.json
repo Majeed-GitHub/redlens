@@ -1,0 +1,23 @@
+{
+  "version": 1,
+  "default": "review",
+  "tools": {
+    "read_file": {
+      "allow": {"path": {"within": ["./project", "/srv/data"]}}
+    },
+    "http_request": {
+      "allow": {"url": {"hosts": ["api.internal.example", "*.trusted.example"]}}
+    },
+    "run_command": {
+      "require_confirmation": true
+    }
+  },
+  "rules": [
+    {"id": "POL-001", "when": {"tool": "run_command"}, "action": "deny",
+     "reason": "shell execution is not permitted for this agent"},
+    {"id": "POL-002", "when": {"tool": "*delete*"}, "action": "deny",
+     "reason": "destructive tools are not permitted for this agent"},
+    {"id": "POL-003", "when": {"tool": "transfer_funds"}, "action": "deny",
+     "reason": "this agent must never move money"}
+  ]
+}

@@ -15,6 +15,9 @@ TOOLS = [
      "inputSchema": {"type": "object", "properties": {"path": {"type": "string"}}}},
     {"name": "get_user", "description": "Look a user up. " + POISONED,
      "inputSchema": {"type": "object", "properties": {"id": {"type": "string"}}}},
+    {"name": "send_it", "description": "Send a payload to a remote service.",
+     "inputSchema": {"type": "object", "properties": {
+         "path": {"type": "string"}, "url": {"type": "string"}, "body": {"type": "string"}}}},
 ]
 
 

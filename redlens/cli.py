@@ -30,6 +30,8 @@ from .scanner import (
     score_findings,
     worst,
 )
+from .audit_log import AuditLog, verify as verify_audit_log
+from .policy import Policy, combine
 from .session import ScanSession
 from .tool_call import scan_tool_call
 
@@ -155,6 +157,23 @@ def cmd_eval(args) -> int:
     print("  false positives  : %d (rate %.1f%%)" % (false_positives, fp_rate * 100))
     print("  hard negatives   : %d" % len(hard))
     print("  false positives  : %d (rate %.1f%%)" % (hard_false_positives, hard_fp_rate * 100))
+
+    call_attacks = _load_jsonl(os.path.join(corpus_dir, "tool_call_attacks.jsonl"))
+    call_benign = _load_jsonl(os.path.join(corpus_dir, "tool_call_benign.jsonl"))
+    call_caught = 0
+    for row in call_attacks:
+        report = scan_tool_call(row.get("tool", ""), row.get("arguments") or {})
+        if report.decision in (DECISION_REVIEW, DECISION_BLOCK):
+            call_caught += 1
+    call_false_positives = 0
+    for row in call_benign:
+        report = scan_tool_call(row.get("tool", ""), row.get("arguments") or {})
+        if report.decision in (DECISION_REVIEW, DECISION_BLOCK):
+            call_false_positives += 1
+    if call_attacks:
+        print("  tool-call attacks: %d" % len(call_attacks))
+        print("  detected         : %d (%.1f%%)" % (call_caught, 100.0 * call_caught / len(call_attacks)))
+        print("  tool-call benign : %d (false positives %d)" % (len(call_benign), call_false_positives))
     print("  by category:")
     for category in sorted(per_category):
         hit, total = per_category[category]
@@ -172,6 +191,12 @@ def cmd_eval(args) -> int:
         return EXIT_FINDINGS
     if args.max_fp is not None and hard_fp_rate > args.max_fp:
         print("FAIL: hard-negative rate %.3f above allowed %.3f" % (hard_fp_rate, args.max_fp))
+        return EXIT_FINDINGS
+    if call_attacks and call_caught < len(call_attacks):
+        print("FAIL: %d of %d tool-call attacks were missed" % (len(call_attacks) - call_caught, len(call_attacks)))
+        return EXIT_FINDINGS
+    if call_false_positives:
+        print("FAIL: %d legitimate tool call(s) flagged" % call_false_positives)
         return EXIT_FINDINGS
     return EXIT_CLEAN
 
@@ -416,6 +441,33 @@ def cmd_call(args) -> int:
     return EXIT_CLEAN
 
 
+def cmd_policy(args) -> int:
+    """Check one tool call against a policy, without the scanner."""
+    try:
+        policy = Policy.load(args.file)
+        arguments = json.loads(args.args) if args.args else {}
+    except (OSError, ValueError) as exc:
+        print("cannot load policy or arguments: %s" % exc, file=sys.stderr)
+        return EXIT_ERROR
+    decision = policy.evaluate(args.tool, arguments)
+    if args.json:
+        print(json.dumps(decision.to_dict(), indent=2))
+    else:
+        print("policy: %s [%s] %s" % (decision.action.upper(), decision.rule_id, decision.reason))
+    return EXIT_FINDINGS if decision.action == "deny" else EXIT_CLEAN
+
+
+def cmd_verify_log(args) -> int:
+    """Walk a chained audit log and report the first broken record."""
+    ok, first_bad, count, message = verify_audit_log(args.file)
+    print(message)
+    if not ok:
+        print("VERIFICATION FAILED at record %s" % first_bad)
+        return EXIT_FINDINGS
+    print("OK: %d record(s) verified" % count)
+    return EXIT_CLEAN
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="redlens",
@@ -476,9 +528,22 @@ def build_parser() -> argparse.ArgumentParser:
     call_parser.add_argument("--fail-on", choices=sorted(FAIL_ON_LEVELS))
     call_parser.set_defaults(func=cmd_call)
 
+    policy_parser = sub.add_parser("policy", help="check a tool call against a policy document")
+    policy_parser.add_argument("--file", "-f", required=True, help="the policy JSON file")
+    policy_parser.add_argument("--tool", required=True)
+    policy_parser.add_argument("--args", help="the arguments as a JSON object")
+    policy_parser.add_argument("--json", action="store_true")
+    policy_parser.set_defaults(func=cmd_policy)
+
+    verify_parser = sub.add_parser("verify-log", help="verify a chained audit log")
+    verify_parser.add_argument("--file", "-f", required=True)
+    verify_parser.set_defaults(func=cmd_verify_log)
+
     audit_parser = sub.add_parser("audit", help="per-rule precision, kill-switch budget, determinism, latency")
     audit_parser.add_argument("--corpus-dir")
-    audit_parser.add_argument("--max-p99-ms", type=float, default=5.0)
+    # A regression gate, not a certificate: the reference machine varies by
+    # several milliseconds under load, so the budget is deliberately generous.
+    audit_parser.add_argument("--max-p99-ms", type=float, default=12.0)
     audit_parser.set_defaults(func=cmd_audit)
     return parser
 
