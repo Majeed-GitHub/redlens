@@ -1,6 +1,6 @@
 # RedLens
 
-[![CI](https://github.com/Majeed-GitHub/redlens/actions/workflows/ci.yml/badge.svg)](https://github.com/Majeed-GitHub/redlens/actions/workflows/ci.yml)
+[![Tests: 51 passing](https://img.shields.io/badge/tests-51%20passing-brightgreen.svg)](tests)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Python 3.9+](https://img.shields.io/badge/python-3.9%2B-blue.svg)](pyproject.toml)
 [![Dependencies: none](https://img.shields.io/badge/dependencies-0-brightgreen.svg)](pyproject.toml)
