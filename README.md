@@ -1,6 +1,6 @@
 # RedLens
 
-[![Tests: 86 passing](https://img.shields.io/badge/tests-86%20passing-brightgreen.svg)](tests)
+[![Tests: 110 passing](https://img.shields.io/badge/tests-110%20passing-brightgreen.svg)](tests)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Python 3.9+](https://img.shields.io/badge/python-3.9%2B-blue.svg)](pyproject.toml)
 [![Dependencies: none](https://img.shields.io/badge/dependencies-0-brightgreen.svg)](pyproject.toml)
@@ -133,6 +133,26 @@ redlens rules --json                            # export every rule set
 The upgrade matters: an instruction the user typed is a user problem, the same instruction
 arriving inside a retrieved document is an attack on the agent.
 
+## Deploy it
+
+Three ways, in order of how much they protect you:
+
+    # 1. A proxy in front of any MCP server: scans tool definitions and arguments
+    python examples/mcp_proxy/proxy.py --server "npx -y @modelcontextprotocol/server-filesystem /tmp" --mode monitor --log audit.jsonl
+
+    # 2. A GitHub Action for manifests in your repository
+    - uses: Majeed-GitHub/redlens/action@main
+      with:
+        manifest: mcp/tools.json
+
+    # 3. A library call, at any boundary
+    python -m redlens scan --fail-on block "user message"
+    python -m redlens manifest --file tools.json
+    python -m redlens call --tool read_file --args '{"path": "~/.ssh/id_rsa"}'
+
+Recipes for the OpenAI Agents SDK, LangChain retrieval and pre-commit are in
+docs/integration.md.
+
 ## Cross-turn sessions
 
 Single-message scanning is blind, by construction, to a payload that only exists across turns.
@@ -260,7 +280,12 @@ redlens/
   manifest.py     whole-toolset analysis for MCP and function-calling manifests
   cli.py          scan / session / manifest / eval / audit / rules commands
   corpus/         graded attack, benign and hard-negative corpora
-tests/            86 regression tests, run with python -m unittest
+examples/       mcp_proxy (a scanning stdio proxy), framework guards
+benchmarks/     redlens-bench-v1, frozen and hashed, licensed CC-BY-4.0
+tools/          ablations.py, the ablation harness behind the report
+docs/           technical report, integration recipes
+action/         composite GitHub Action, installable without workflow scope
+tests/          110 regression tests, run with python -m unittest
 ```
 
 ## License

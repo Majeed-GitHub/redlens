@@ -1,0 +1,15 @@
+- id: redlens-manifest
+  name: RedLens tool manifest scan
+  description: Scan an MCP or function-calling tool manifest for poisoning before it is committed
+  entry: python -m redlens manifest --file
+  language: system
+  files: '(^|/)(mcp|tools|manifest)\.json$'
+  pass_filenames: true
+
+- id: redlens-prompts
+  name: RedLens prompt scan
+  description: Scan prompt and system-message files for injection patterns
+  entry: python -m redlens scan --file
+  language: system
+  files: '\.(prompt|system)$'
+  pass_filenames: true

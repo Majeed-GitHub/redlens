@@ -1,0 +1,13 @@
+{
+  "mcpServers": {
+    "filesystem": {
+      "command": "python",
+      "args": [
+        "C:/path/to/redlens/examples/mcp_proxy/proxy.py",
+        "--server", "npx -y @modelcontextprotocol/server-filesystem /tmp",
+        "--mode", "enforce",
+        "--log", "audit.jsonl"
+      ]
+    }
+  }
+}

@@ -2,6 +2,22 @@
 
 All notable changes. One line per change, in the commit that made it.
 
+## 0.4.0 - deployable, not just importable
+
+- examples/mcp_proxy: a stdlib-only stdio proxy that scans every tool manifest
+  and every tool call passing through it, in monitor or enforce mode, writing a
+  JSON audit line per decision. Replaces a poisoned manifest with a JSON-RPC
+  error rather than handing it to the client.
+- action/action.yml: a composite GitHub Action that installs RedLens from the
+  repository, verifies it against the frozen corpus, and scans a manifest. Ships
+  this way because a composite action needs no workflow scope to publish.
+- .pre-commit-hooks.yaml: manifest and prompt hooks.
+- docs/integration.md: where to place the check on five boundaries, what each
+  costs, and the audit line each should emit.
+- examples/openai_agents_guardrail.py and examples/langchain_guard.py.
+- 5 end-to-end proxy tests driving a fake server with one honest and one
+  poisoned tool.
+
 ## 0.3.0 - tool-call arguments, hidden content, and a written scope
 
 - Add scan_tool_call: inspects the arguments of a single call for secret paths,
