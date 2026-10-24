@@ -31,6 +31,7 @@ from .scanner import (
     worst,
 )
 from .audit_log import AuditLog, verify as verify_audit_log
+from .evolution import evolve, load_jsonl
 from .policy import Policy, combine
 from .session import ScanSession
 from .tool_call import scan_tool_call
@@ -468,6 +469,52 @@ def cmd_verify_log(args) -> int:
     return EXIT_CLEAN
 
 
+def cmd_evolve(args) -> int:
+    """Run the self-improvement loop against the frozen corpus."""
+    corpus_dir = args.corpus_dir or CORPUS_DIR
+    seeds = _load_jsonl(os.path.join(corpus_dir, "attacks.jsonl"))
+    benign = _load_jsonl(os.path.join(corpus_dir, "benign.jsonl"))
+    benign += _load_jsonl(os.path.join(corpus_dir, "benign_hard.jsonl"))
+    if not seeds:
+        print("no attack corpus at " + corpus_dir, file=sys.stderr)
+        return EXIT_ERROR
+
+    report = evolve(
+        seeds, benign,
+        rounds=args.rounds, seed=args.seed, per_text=args.per_text,
+        proposals_per_round=args.proposals, max_accepted=args.max_rules,
+    )
+
+    if args.out:
+        with open(args.out, "w", encoding="utf-8") as handle:
+            json.dump(report, handle, indent=2)
+
+    if args.json:
+        print(json.dumps({key: value for key, value in report.items() if key != "rules"}, indent=2))
+    else:
+        baseline, final = report["baseline"], report["final"]
+        print("RedLens evolution")
+        print("  seed              : %d" % report["seed"])
+        print("  generated attacks : %d (from %d seeds)" % (report["generated_attacks"], len(seeds)))
+        print("  benign samples    : %d" % report["benign_samples"])
+        print("  recall before     : %d/%d (%.1f%%)" % (baseline["caught"], baseline["attacks"], baseline["recall"] * 100))
+        print("  recall after      : %d/%d (%.1f%%)" % (final["caught"], final["attacks"], final["recall"] * 100))
+        print("  false positives   : %d before, %d after" % (baseline["false_positives"], final["false_positives"]))
+        print("  rules accepted    : %d %s" % (len(report["accepted_rules"]), ", ".join(report["accepted_rules"])))
+        for entry in report["history"]:
+            print("  round %d: missed %d, proposed %d, accepted %d" % (
+                entry["round"], entry["missed"], entry["proposed"], entry["accepted"]))
+        rejected = [item for item in report["decisions"] if not item["accepted"]]
+        print("  proposals refused : %d" % len(rejected))
+        for item in rejected[:6]:
+            print("    %-9s %s" % (item["rule_id"], item["reason"]))
+        for rule in report["rules"]:
+            print("    accepted %s  %s" % (rule["id"], rule["pattern"]))
+        if args.out:
+            print("  report written to : %s" % args.out)
+    return EXIT_CLEAN
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="redlens",
@@ -538,6 +585,17 @@ def build_parser() -> argparse.ArgumentParser:
     verify_parser = sub.add_parser("verify-log", help="verify a chained audit log")
     verify_parser.add_argument("--file", "-f", required=True)
     verify_parser.set_defaults(func=cmd_verify_log)
+
+    evolve_parser = sub.add_parser("evolve", help="generate attacks, propose rules, accept only what measurably wins")
+    evolve_parser.add_argument("--corpus-dir", help="frozen corpus to seed and gate against")
+    evolve_parser.add_argument("--rounds", type=int, default=3)
+    evolve_parser.add_argument("--seed", type=int, default=0)
+    evolve_parser.add_argument("--per-text", type=int, default=3, help="mutations per seed attack")
+    evolve_parser.add_argument("--proposals", type=int, default=3, help="candidate rules proposed per round")
+    evolve_parser.add_argument("--max-rules", type=int, default=6)
+    evolve_parser.add_argument("--out", help="write the full report as JSON")
+    evolve_parser.add_argument("--json", action="store_true")
+    evolve_parser.set_defaults(func=cmd_evolve)
 
     audit_parser = sub.add_parser("audit", help="per-rule precision, kill-switch budget, determinism, latency")
     audit_parser.add_argument("--corpus-dir")

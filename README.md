@@ -220,6 +220,22 @@ The reachable-pair question - tool A reads files, tool B sends network traffic -
 not flagged. Almost every real toolset contains that pair, and a check that fires on every
 toolset is a check nobody reads. Only combinations inside a single tool are reported.
 
+## The self-improvement loop
+
+A hand-written rule pack stops improving when its author does. This closes the loop: generate
+attacks by mutation, measure what the pack misses, synthesise candidate rules from the phrases
+that separate a miss from benign text, and accept one only if it measurably improves and changes
+nothing else.
+
+    python -m redlens evolve --corpus-dir benchmarks/redlens-bench-v1 --rounds 3 --seed 7
+
+The reference run: 537 generated attacks from 205 seeds, recall 91.6 to 92.0 percent, zero false
+positives before and after, one rule accepted and eight proposals refused with reasons. The first
+run accepted a rule matching the generator's own scaffolding - it was learning itself, not attacks
+- and it found a genuine detector bug in letter-spaced punctuation that was worth four percentage
+points of recall once fixed. Both are written up in docs/evolution.md, because the refusals and
+the failures are the useful part.
+
 ## Policy, and a record you can verify
 
 The scanner asks whether text is hostile. Policy asks whether the agent was allowed to act at all,

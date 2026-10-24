@@ -124,19 +124,28 @@ def flatten(text: str) -> str:
 
 
 def join_spaced_letters(text: str) -> str:
-    """Rebuild words written one letter at a time, keeping the word boundaries.
+    """Rebuild words written one letter at a time.
 
     "i g n o r e   a l l" becomes "ignore   all", so the rule pack sees the real
-    phrase while the wider gaps that separate words are preserved.
+    phrase while the wider gaps that separate words are preserved. Runs of single
+    letters separated by ordinary single spaces are joined too, which is how the
+    mutation generator writes them and how an attacker would.
     """
     rebuilt = []
     for chunk in re.split(r"(\s{2,})", text):
         parts = chunk.split()
-        if len(parts) >= 2 and all(len(part) == 1 and part.isalpha() for part in parts):
+        # Single characters, letters or punctuation: "h e a d e r s :" is also a
+        # letter-spaced word, and an attacker writing this way does not skip the
+        # punctuation.
+        if len(parts) >= 2 and all(len(part) == 1 for part in parts):
             rebuilt.append("".join(parts))
         else:
             rebuilt.append(chunk)
-    return "".join(rebuilt)
+    collapsed = "".join(rebuilt)
+    # Now join single-letter runs that are separated by one space, word by word.
+    def _join(run):
+        return run.group(0).replace(" ", "")
+    return re.sub(r"(?:(?<=^)|(?<=\s))[A-Za-z](?: [A-Za-z])+(?=\s|$)", _join, collapsed)
 
 
 _HTML_COMMENT = re.compile(r"<!--(.*?)-->", re.DOTALL)

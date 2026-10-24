@@ -2,6 +2,28 @@
 
 All notable changes. One line per change, in the commit that made it.
 
+## 0.6.0 - the closed loop
+
+- redlens/evolution: generate attacks by mutation, measure the pack against them,
+  synthesise candidate rules from phrases that separate a miss from benign text,
+  and accept a candidate only when it catches something new without adding a false
+  positive, staying inside the latency budget, being a kill switch, leaking the
+  generator's own scaffolding, or duplicating an accepted rule.
+- redlens evolve: runs the loop from the frozen corpus, prints before and after,
+  and writes the full report, refusals included, as JSON.
+- First real run: 537 generated attacks from 205 seeds, recall 91.6 to 92.0
+  percent, zero false positives before and after, one rule accepted and eight
+  proposals refused with reasons.
+- The run exposed a detector gap: letter-spaced words with punctuation were never
+  rejoined, which cost 22 of the 537 generated attacks. Fixed, and baseline recall
+  rose from 88.3 to 91.6 percent before any rule was added.
+- The same run exposed two dead checks in the gate: the scaffolding and
+  subsumption guards parsed the rule regex instead of its phrase, so they always
+  passed. Both fixed, with the unit test that caught it.
+- The generator no longer prefixes prose to encoded payloads, because the loop
+  learned that prefix instead of an attack.
+- 146 tests.
+
 ## 0.5.0 - policy and a tamper-evident record
 
 - redlens/policy.py: a JSON policy for what an agent is allowed to do - path roots,
