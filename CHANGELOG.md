@@ -2,6 +2,30 @@
 
 All notable changes. One line per change, in the commit that made it.
 
+## 0.8.0 - the gate is content-addressed, and its old number is withdrawn
+
+- The acceptance gate verifies the artifact, not the id: regex and pre-filter
+  caches are keyed by (id, pattern, flags), every decision records a content
+  fingerprint, and the gate refuses to measure a rule whose compiled pattern is
+  not the one it holds.
+- Eight defects found by an independent adversarial review are fixed, each with a
+  regression test in tests/test_gate_integrity.py: measuring a different regex,
+  lints reading the description, row-counted gains, double-counted gains, a cap
+  applied after the verdict, per-candidate latency, p99 as the sample maximum,
+  and layer-dependent verdicts.
+- Latency is a real quantile over inputs drawn from the corpora, and a candidate
+  that never fires is refused instead of timed at zero cost.
+- Gains require a second, seed-disjoint holdout, so a rule matching shared
+  context prose is refused.
+- Fixed while fixing the above: phrase patterns rebuilt with whitespace could
+  never match text containing punctuation, and the literal extractor read a
+  unicode escape as literal hex text, which made the pre-filter skip the
+  multilingual rules entirely.
+- Withdrawn as unreproduced: the v0.6.0 claim of one accepted rule and recall
+  moving 91.6 to 92.0 percent. Under the corrected gate the loop accepts nothing
+  on the frozen corpus; the corrected run is published beside the old claim.
+- 193 tests.
+
 ## 0.7.0 - runtime controls, and a held-out number
 
 - Error-path injection is its own passive layer (error_output) with rules RL-601

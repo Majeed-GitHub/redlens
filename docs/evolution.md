@@ -36,7 +36,26 @@ its bad ideas. A candidate is accepted only when all of these hold:
 Every refusal is reported with a reason. A rejection is a result: it says the
 phrase that looked discriminating was not.
 
-## A run, in numbers
+## Correction: the first numbers were unreproduced
+
+The v0.6.0 release reported one accepted rule and recall moving from 91.6 to 92.0 percent. An
+independent adversarial review of the gate found eight defects, including a cache keyed by rule id
+that let the gate measure one regex and accept another. Those numbers were produced by a gate that
+did not verify the artifact it accepted, so they are withdrawn. The original claim is kept in the
+changelog rather than deleted.
+
+With the gate fixed, re-run on the same corpus:
+
+    391 generated attacks from the tuning seeds, holdout generated from different seeds
+    recall 367/391 (93.9%) before and after, zero false positives
+    rules accepted: 0, proposals refused: 9, every refusal citing the seed-disjoint holdout
+
+The gate now refuses candidates that do not generalise, and phrase-level synthesis rarely produces
+one that does. That is a negative result about the synthesiser. Publishing it is the point: a loop
+that cannot pass its own honest gate must say so rather than tune the gate until something slips
+through.
+
+## A run, in numbers (v0.6.0, withdrawn)
 
     537 generated attacks from 205 seeds, 107 benign and hard-negative samples
     recall 91.6% -> 92.0%, false positives 0 -> 0

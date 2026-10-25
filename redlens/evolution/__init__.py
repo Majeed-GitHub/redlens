@@ -17,13 +17,24 @@ Nothing here trains a model, and nothing here may weaken the frozen benchmark:
 generated attacks live in a separate pending corpus until a human promotes them.
 """
 
-from .accept import Decision, evolve, evaluate_candidate
+from .accept import (
+    GATE_VERSION,
+    Decision,
+    evaluate_candidate,
+    evolve,
+    fingerprint,
+    split_pool,
+)
 from .attackgen import MUTATION_NAMES, SCAFFOLD, generate, mutate
-from .miner import Metrics, cluster_misses, load_jsonl, measure
+from .miner import Metrics, cluster_misses, load_jsonl, measure, quantile
 from .synthesizer import discriminating_phrases, propose_rules
 
 __all__ = [
     "Decision",
+    "GATE_VERSION",
+    "fingerprint",
+    "quantile",
+    "split_pool",
     "MUTATION_NAMES",
     "SCAFFOLD",
     "Metrics",

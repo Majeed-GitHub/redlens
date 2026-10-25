@@ -286,7 +286,7 @@ def normalized_layers(text: str) -> List[Tuple[str, str]]:
     return layers
 
 
-_COMPILED: Dict[str, "re.Pattern[str]"] = {}
+_COMPILED: Dict[tuple, "re.Pattern[str]"] = {}
 
 # ---------------------------------------------------------------------------
 # Literal pre-filter.
@@ -303,10 +303,41 @@ _COMPILED: Dict[str, "re.Pattern[str]"] = {}
 # ---------------------------------------------------------------------------
 
 _MIN_LITERAL = 4
-_PRESCREEN_CACHE: Dict[str, Optional[frozenset]] = {}
+_PRESCREEN_CACHE: Dict[tuple, Optional[frozenset]] = {}
 
 
-def _literal_runs(pattern: str) -> List[str]:
+_ESCAPE_WIDTHS = {"u": 4, "U": 8, "x": 2}
+
+
+def consume_escape(pattern: str, index: int):
+    """(character the escape denotes or None, characters consumed).
+
+    \u062a is the letter it denotes, not the text "062a". Reading the hex as
+    words made an Arabic rule look like it required the string "062a", so the
+    pre-filter skipped it and the rule never ran.
+    """
+    if index + 1 >= len(pattern):
+        return None, 1
+    kind = pattern[index + 1]
+    if kind in _ESCAPE_WIDTHS:
+        width = _ESCAPE_WIDTHS[kind]
+        digits = pattern[index + 2:index + 2 + width]
+        if len(digits) == width:
+            try:
+                return chr(int(digits, 16)), 2 + width
+            except ValueError:
+                return None, 2 + width
+        return None, 2 + width
+    if kind == "N" and index + 2 < len(pattern) and pattern[index + 2] == "{":
+        end = pattern.find("}", index + 3)
+        if end != -1:
+            return None, end - index + 1
+    if kind in "nrtf":
+        return " ", 2
+    return None, 2
+
+
+def _literal_runs(pattern: str, minimum: int = _MIN_LITERAL) -> List[str]:
     runs: List[str] = []
     current: List[str] = []
     in_class = False
@@ -314,10 +345,13 @@ def _literal_runs(pattern: str) -> List[str]:
     while index < len(pattern):
         char = pattern[index]
         if char == "\\":
-            if current:
+            decoded, width = consume_escape(pattern, index)
+            if decoded is not None and decoded.isalnum():
+                current.append(decoded)
+            elif current:
                 runs.append("".join(current))
                 current = []
-            index += 2
+            index += width
             continue
         if in_class:
             if char == "]":
@@ -331,7 +365,9 @@ def _literal_runs(pattern: str) -> List[str]:
             in_class = True
             index += 1
             continue
-        if char.isalpha():
+        if char.isalnum():
+            # Digits belong to the word: splitting "h77p" into "h" and "p" made a
+            # leet phrase unreadable to both the pre-filter and the acceptance gate.
             current.append(char)
             index += 1
             continue
@@ -341,7 +377,7 @@ def _literal_runs(pattern: str) -> List[str]:
         index += 1
     if current:
         runs.append("".join(current))
-    return [run for run in runs if len(run) >= _MIN_LITERAL]
+    return [run for run in runs if len(run) >= minimum]
 
 
 def _every_branch_has_a_literal(pattern: str) -> bool:
@@ -377,14 +413,29 @@ def _every_branch_has_a_literal(pattern: str) -> bool:
     return all(_literal_runs(branch) for branch in branches)
 
 
+def pattern_words(pattern: str, minimum: int = 4) -> List[str]:
+    """The literal words a pattern cannot match without.
+
+    Public because the acceptance gate must read a candidate's meaning from its
+    pattern, not from its description: the same helper decides what the
+    pre-filter may skip and what the gate thinks a rule says. Reading the
+    description instead was defect D2 in the adversarial review.
+    """
+    return _literal_runs(pattern, minimum)
+
+
 def prescreen_literals(rule: Rule) -> Optional[frozenset]:
-    """The words a match must contain, or None when the rule always has to run."""
-    if rule.id not in _PRESCREEN_CACHE:
+    """The words a match must contain, or None when the rule always has to run.
+
+    Keyed by the pattern, for the same reason compiled() is: an id is a label.
+    """
+    key = (rule.id, rule.pattern, rule.regex_flags)
+    if key not in _PRESCREEN_CACHE:
         if _every_branch_has_a_literal(rule.pattern):
-            _PRESCREEN_CACHE[rule.id] = frozenset(run.lower() for run in _literal_runs(rule.pattern))
+            _PRESCREEN_CACHE[key] = frozenset(run.lower() for run in _literal_runs(rule.pattern))
         else:
-            _PRESCREEN_CACHE[rule.id] = None
-    return _PRESCREEN_CACHE[rule.id]
+            _PRESCREEN_CACHE[key] = None
+    return _PRESCREEN_CACHE[key]
 
 
 def _warm_prescreen_cache() -> int:
@@ -400,9 +451,17 @@ PRESCREENED_RULES = _warm_prescreen_cache()
 
 
 def compiled(rule: Rule):
-    if rule.id not in _COMPILED:
-        _COMPILED[rule.id] = re.compile(rule.pattern, rule.regex_flags)
-    return _COMPILED[rule.id]
+    """Compile a rule, keyed by the pattern itself.
+
+    Keying by rule id was the defect an adversarial review found: two rules that
+    share an id but differ in pattern collided in this cache, so a gate could
+    measure one regex and accept another. Identity here is the artifact:
+    (id, pattern, flags).
+    """
+    key = (rule.id, rule.pattern, rule.regex_flags)
+    if key not in _COMPILED:
+        _COMPILED[key] = re.compile(rule.pattern, rule.regex_flags)
+    return _COMPILED[key]
 
 
 def _evidence(text: str, start: int, end: int, width: int = 60) -> str:

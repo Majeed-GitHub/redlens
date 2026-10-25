@@ -249,12 +249,22 @@ nothing else.
 
     python -m redlens evolve --corpus-dir benchmarks/redlens-bench-v1 --rounds 3 --seed 7
 
-The reference run: 537 generated attacks from 205 seeds, recall 91.6 to 92.0 percent, zero false
-positives before and after, one rule accepted and eight proposals refused with reasons. The first
-run accepted a rule matching the generator's own scaffolding - it was learning itself, not attacks
-- and it found a genuine detector bug in letter-spaced punctuation that was worth four percentage
-points of recall once fixed. Both are written up in docs/evolution.md, because the refusals and
-the failures are the useful part.
+**The gate is experimental and its earlier numbers are unreproduced.** An independent
+adversarial review found eight defects in it (reviews/2026-10-25-acceptance-gate.md), including one
+where it could measure one regex and accept another because both shared a rule id. All eight are
+fixed and guarded by tests/test_gate_integrity.py.
+
+The v0.6.0 claim - one rule accepted, recall 91.6 to 92.0 percent - is **withdrawn as unreproduced**
+and kept here rather than deleted. Re-run under the corrected, content-addressed gate:
+
+    391 generated attacks from the tuning seed split, holdout from different seeds
+    recall 367/391 (93.9%) before and after, zero false positives
+    rules accepted: 0     proposals refused: 9
+
+Every refusal now reads "catches nothing on the seed-disjoint holdout". That is a negative result
+about the synthesiser: a phrase lifted from one attack rarely catches attacks it was not derived
+from. The corrected gate is honest; the loop still cannot pass it. Both facts are in
+docs/evolution.md.
 
 ## Policy, and a record you can verify
 
