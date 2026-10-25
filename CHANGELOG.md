@@ -2,6 +2,25 @@
 
 All notable changes. One line per change, in the commit that made it.
 
+## 0.8.1 - the gateway enforces, and the test that proves it
+
+- examples/llm_gateway.py is hardened: streaming responses are refused rather
+  than forwarded uninspected (opt in with --allow-streaming and the log records
+  that the stream was unscanned), request bodies are size-capped, and a scanner
+  failure fails closed by default instead of silently forwarding.
+- The gateway now loads a policy and checks the tool calls the model asks for
+  before the agent can execute them, so POL-GRANT applies at the gateway and not
+  only in the library. Records carry rule ids and argument names, never values.
+- Policy semantics fixed: a grant is an allowlist. Previously a granted tool fell
+  through to the document default, so a policy with default: deny refused every
+  tool the agent had been granted. Per-tool constraints still apply.
+- tests/test_gateway.py: 15 end-to-end tests driving the real handler against a
+  mock upstream, asserting that a blocked request never reaches the model, a
+  canary-bearing response never reaches the client, an ungranted tool call is
+  refused with POL-GRANT, streaming is a 501, the body cap is a 413, a failing
+  scanner is a 503, and the audit chain verifies afterwards.
+- 208 tests.
+
 ## 0.8.0 - the gate is content-addressed, and its old number is withdrawn
 
 - The acceptance gate verifies the artifact, not the id: regex and pre-filter

@@ -160,6 +160,7 @@ class Policy:
         # allowed to call at all. A tool that is absent from the grant list is out
         # of bounds even when the call itself is clean.
         grants = self.document.get("grants")
+        granted = False
         if isinstance(grants, dict) and agent:
             allowed = grants.get(agent)
             if allowed is None:
@@ -168,6 +169,11 @@ class Policy:
             if name not in allowed:
                 return PolicyDecision(ACTION_DENY, "POL-GRANT",
                                       "agent %s is not granted the tool %s" % (agent, name))
+            # A grant is an allowlist, not merely a filter in front of the default.
+            # An explicit grant authorises the call unless a rule or a per-tool
+            # constraint refuses it; otherwise "default: deny" would silently
+            # refuse every tool the agent was granted.
+            granted = True
 
         for rule in self.rules:
             if _matches_when(rule.get("when") or {}, name, arguments):
@@ -188,6 +194,9 @@ class Policy:
             if decision:
                 return decision
 
+        if granted:
+            return PolicyDecision(ACTION_ALLOW, "POL-GRANT",
+                                  "agent %s is granted the tool %s" % (agent, name))
         return PolicyDecision(self.default, "POL-DEFAULT", "no rule matched; policy default is %s" % self.default)
 
     def _check_tool(self, name: str, spec: Dict[str, Any], arguments: Dict[str, Any]) -> Optional[PolicyDecision]:

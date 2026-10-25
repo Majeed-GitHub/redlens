@@ -120,6 +120,19 @@ class TestRuntimeGrants(unittest.TestCase):
         policy = Policy(self.POLICY)
         self.assertEqual(policy.evaluate("get_weather", {}, agent="other").rule_id, "POL-GRANT")
 
+    def test_a_grant_authorises_even_when_the_default_is_deny(self):
+        policy = Policy({"default": "deny", "grants": {"a": ["get_weather"]}, "tools": {"get_weather": {}}})
+        self.assertEqual(policy.evaluate("get_weather", {}, agent="a").action, "allow")
+
+    def test_a_granted_tool_still_faces_its_own_constraints(self):
+        policy = Policy({
+            "default": "deny",
+            "grants": {"a": ["read_file"]},
+            "tools": {"read_file": {"allow": {"path": {"within": ["./project"]}}}},
+        })
+        self.assertEqual(policy.evaluate("read_file", {"path": "./project/x"}, agent="a").action, "allow")
+        self.assertEqual(policy.evaluate("read_file", {"path": "~/.ssh/id_rsa"}, agent="a").action, "deny")
+
     def test_without_a_grant_list_policy_behaves_as_before(self):
         policy = Policy({"default": "allow"})
         self.assertEqual(policy.evaluate("anything", {}, agent=None).action, "allow")
