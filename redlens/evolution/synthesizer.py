@@ -101,7 +101,7 @@ def discriminating_phrases(
 
 def build_rule(phrase: str, category: str, rule_id: str, severity: str = "high",
                parent: str = "", literal: bool = False) -> Rule:
-    """A rule for a phrase, with flexible whitespace between its pieces.
+    r"""A rule for a phrase, with flexible whitespace between its pieces.
 
     literal=False joins the words with \s+ (a normalised phrase).
     literal=True escapes the phrase as text, so punctuation between the words
