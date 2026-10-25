@@ -2,6 +2,23 @@
 
 All notable changes. One line per change, in the commit that made it.
 
+## 0.8.2 - the HTTP sidecar, which task-2 had been claiming for days
+
+- redlens/service.py: a stdlib HTTP sidecar for callers that cannot import
+  Python. GET /health, POST /scan, POST /scan/tool, POST /scan/session. The HTTP
+  status carries the decision: 200 clean or allow_with_warnings, 422 review, 403
+  block, so a caller can gate without parsing JSON.
+- redlens serve runs it. A non-loopback bind without a token is refused rather
+  than warned about; bodies are size-capped; /health needs no token and nothing
+  else does.
+- tests/test_service.py: 15 tests over a live socket, covering the status codes,
+  the layer effect on the verdict, both tool and session endpoints, the auth
+  split, the body cap and the non-loopback guard.
+- Task board corrected: task-2 was marked in progress for days while no one was
+  working it and the file did not exist. It is finished here. task-3 is marked
+  completed because the harness repo it described does exist and is green.
+- 225 tests.
+
 ## 0.8.1 - the gateway enforces, and the test that proves it
 
 - examples/llm_gateway.py is hardened: streaming responses are refused rather

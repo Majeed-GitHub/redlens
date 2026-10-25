@@ -596,6 +596,18 @@ def cmd_log(args) -> int:
     return EXIT_CLEAN
 
 
+def cmd_serve(args) -> int:
+    """Run the HTTP sidecar."""
+    from .service import serve
+    token = args.token
+    if not token and args.token_env:
+        token = os.environ.get(args.token_env)
+        if not token:
+            print("environment variable %s is empty" % args.token_env, file=sys.stderr)
+            return EXIT_ERROR
+    return serve(host=args.host, port=args.port, token=token, max_body=args.max_body_bytes)
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="redlens",
@@ -698,6 +710,14 @@ def build_parser() -> argparse.ArgumentParser:
     evolve_parser.add_argument("--out", help="write the full report as JSON")
     evolve_parser.add_argument("--json", action="store_true")
     evolve_parser.set_defaults(func=cmd_evolve)
+
+    serve_parser = sub.add_parser("serve", help="run the HTTP sidecar for callers that cannot import Python")
+    serve_parser.add_argument("--host", default="127.0.0.1", help="bind address; a non-loopback host requires a token")
+    serve_parser.add_argument("--port", type=int, default=8123)
+    serve_parser.add_argument("--token", help="shared bearer token (prefer --token-env)")
+    serve_parser.add_argument("--token-env", help="environment variable holding the token")
+    serve_parser.add_argument("--max-body-bytes", type=int, default=262144)
+    serve_parser.set_defaults(func=cmd_serve)
 
     audit_parser = sub.add_parser("audit", help="per-rule precision, kill-switch budget, determinism, latency")
     audit_parser.add_argument("--corpus-dir")
