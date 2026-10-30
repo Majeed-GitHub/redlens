@@ -1,19 +1,36 @@
 name: RedLens scan
-description: Scan prompts, MCP manifests and tool definitions for prompt injection and tool poisoning
+description: Scan prompts, documents, MCP manifests and tool definitions for prompt injection and tool poisoning
 author: Shaik Majeed
 branding:
   icon: shield
   color: purple
 
 inputs:
+  paths:
+    description: Space-separated files or directories to scan with the ci command
+    required: false
+    default: "."
   manifest:
     description: Optional path to a JSON tool manifest to scan
+    required: false
+    default: ""
+  baseline:
+    description: Optional baseline file; findings recorded there are suppressed
+    required: false
+    default: ""
+  sarif:
+    description: Write a SARIF log to this path for upload-sarif
     required: false
     default: ""
   fail-on:
     description: Exit non-zero when a finding reaches this decision (any, review, block)
     required: false
     default: block
+
+outputs:
+  sarif-file:
+    description: Path of the SARIF log, when the sarif input was set
+    value: ${{ steps.scan-tree.outputs.sarif-file }}
 
 runs:
   using: composite
@@ -35,3 +52,41 @@ runs:
       if: inputs.manifest != ''
       shell: bash
       run: python -m redlens manifest --file "${{ inputs.manifest }}" --fail-on "${{ inputs.fail-on }}"
+    - name: Scan paths and emit SARIF
+      id: scan-tree
+      if: inputs.paths != ''
+      shell: bash
+      env:
+        INPUT_PATHS: ${{ inputs.paths }}
+        INPUT_BASELINE: ${{ inputs.baseline }}
+        INPUT_SARIF: ${{ inputs.sarif }}
+        INPUT_FAIL_ON: ${{ inputs.fail-on }}
+      run: |
+        set -euo pipefail
+        if [ -n "$INPUT_BASELINE" ] && [ -n "$INPUT_SARIF" ]; then
+          set +e
+          python -m redlens ci $INPUT_PATHS --format sarif --baseline "$INPUT_BASELINE" --fail-on "$INPUT_FAIL_ON" > "$INPUT_SARIF"
+          status=$?
+          set -e
+        elif [ -n "$INPUT_SARIF" ]; then
+          # The gate runs on the same scan that writes the log, so a failing
+          # build still leaves a complete SARIF file for the reviewer.
+          set +e
+          python -m redlens ci $INPUT_PATHS --format sarif --fail-on "$INPUT_FAIL_ON" > "$INPUT_SARIF"
+          status=$?
+          set -e
+        elif [ -n "$INPUT_BASELINE" ]; then
+          set +e
+          python -m redlens ci $INPUT_PATHS --baseline "$INPUT_BASELINE" --fail-on "$INPUT_FAIL_ON"
+          status=$?
+          set -e
+        else
+          set +e
+          python -m redlens ci $INPUT_PATHS --fail-on "$INPUT_FAIL_ON"
+          status=$?
+          set -e
+        fi
+        if [ -n "$INPUT_SARIF" ]; then
+          echo "sarif-file=$INPUT_SARIF" >> "$GITHUB_OUTPUT"
+        fi
+        exit $status

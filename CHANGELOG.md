@@ -2,6 +2,56 @@
 
 All notable changes. One line per change, in the commit that made it.
 
+## 0.9.0 - the release that makes a team able to adopt it
+
+- redlens/sarif.py: SARIF 2.1.0 export. Findings become review annotations in
+  GitHub Code Scanning, Azure DevOps and any CI that reads SARIF, instead of
+  scrollback. Rule metadata comes from the rule pack (regex rules and the
+  structural ones alike), severity maps to a SARIF level, the offset becomes a
+  line and column, and the fingerprint rides along as a partialFingerprint.
+- redlens/identity.py: finding identity, and an honest one. The first design
+  hashed the evidence window; measured against the shipped corpus it kept only
+  13% of findings' identities once a sentence was added around them, because
+  the window grows with the surrounding text. Identity is now positional -
+  rule, target, line, occurrence - so anything whose line did not move keeps
+  its identity. The trade-off is documented instead of hidden: text inserted
+  above a finding makes it new again.
+- redlens/baseline.py: baseline suppression. Nobody enables a scanner that
+  reports fifty pre-existing findings and blocks the build, so --save-baseline
+  records what exists today and --baseline reports only what is new. The
+  verdict is rescored after suppression, so a suppressed finding cannot keep
+  a clean scan failing forever.
+- redlens ci: scan a whole tree in one call and gate the build. Deterministic
+  file discovery, dependency and cache directories skipped, a per-file size
+  cap, one SARIF log for the tree, relative paths under the working directory,
+  and one exit code.
+- action/action.yml: the composite action now scans a path and can emit SARIF,
+  so wiring a repository takes one step instead of a script.
+- Version honesty fixed: __init__.py and pyproject.toml said 0.8.2 while
+  v0.8.3 and v0.8.4 had been tagged, so 'redlens --version' and every SARIF
+  log from those releases carried the wrong version. tests/test_hygiene.py now
+  fails if the package, the metadata and the changelog disagree.
+- 270 tests.
+
+## 0.8.4 - the warning a stranger saw first
+
+- redlens/evolution/synthesizer.py: the build_rule docstring was not raw and
+  contained \s+, so Python 3.12 emitted a SyntaxWarning on import and a future
+  version will make it an error.
+- tests/test_hygiene.py: every module is compiled in memory with SyntaxWarning
+  promoted, so the next one fails the suite.
+- CI runs the same compileall gate before the test suite, so the warning
+  breaks the build here instead of scrolling past a cloner's terminal.
+
+## 0.8.3 - CI, and the integration recipes
+
+- .github/workflows/ci.yml: tests on Python 3.9, 3.11, 3.12 and 3.13, plus the
+  corpus evaluation, the latency and determinism audit, and the rule-pack
+  export.
+- docs/integration.md, docs/validation.md and docs/bedrock-runbook.md: the
+  recipes for LangChain, the OpenAI Agents SDK and pre-commit; the protocol an
+  outside tester runs; and the two-command Bedrock evaluation.
+
 ## 0.8.2 - the HTTP sidecar, which task-2 had been claiming for days
 
 - redlens/service.py: a stdlib HTTP sidecar for callers that cannot import

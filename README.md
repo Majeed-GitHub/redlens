@@ -119,6 +119,10 @@ redlens scan --file prompt.txt --json           # machine readable
 cat webpage.txt | redlens scan --layer retrieved
 redlens scan --layer tool_definition --file tool.json
 redlens scan --fail-on block "..."              # exit 1 when blocked, for CI and hooks
+redlens scan --format sarif --file doc.md       # SARIF for a code-scanning tab
+redlens ci docs/ prompts/ --format sarif        # scan a tree, one SARIF log
+redlens ci . --save-baseline redlens-baseline.json   # accept today's findings once
+redlens ci . --baseline redlens-baseline.json --fail-on review   # then gate on new ones
 redlens scan --output --canary CANARY-7f3a91    # scan model output instead of input
 redlens session --file conversation.json        # scan a conversation turn by turn
 redlens manifest --file tools.json              # analyse an MCP or function-calling toolset
@@ -152,10 +156,12 @@ Three ways, in order of how much they protect you:
     #    (this repo ships examples/mcp_proxy/fake_server.py, so it runs offline)
     python examples/mcp_proxy/proxy.py --server "python examples/mcp_proxy/fake_server.py" --mode monitor --log audit.jsonl
 
-    # 2. A GitHub Action for manifests in your repository
+    # 2. A GitHub Action for a repository: scan paths and upload SARIF
     - uses: Majeed-GitHub/redlens/action@main
       with:
-        manifest: mcp/tools.json
+        paths: "prompts/ docs/"
+        fail-on: review
+        sarif: redlens.sarif
 
     # 3. A library call, at any boundary
     python -m redlens scan --fail-on block "user message"
@@ -166,6 +172,48 @@ Three ways, in order of how much they protect you:
 
 Recipes for the OpenAI Agents SDK, LangChain retrieval and pre-commit are in
 docs/integration.md.
+
+## Run it in CI
+
+A scanner that cannot be switched on is not a control. Two pieces make adoption
+possible: SARIF output, so findings land in the code-scanning tab instead of a
+log, and a baseline, so a repository with existing findings can adopt the gate
+today and still fail on what is new.
+
+    name: redlens
+    on: [pull_request]
+    permissions:
+      contents: read
+      security-events: write
+    jobs:
+      scan:
+        runs-on: ubuntu-latest
+        steps:
+          - uses: actions/checkout@v4
+          - uses: Majeed-GitHub/redlens/action@main
+            with:
+              paths: "prompts/ docs/"
+              fail-on: review
+              sarif: redlens.sarif
+          - uses: github/codeql-action/upload-sarif@v3
+            if: always()
+            with:
+              sarif_file: redlens.sarif
+
+Without the action, the same thing is one command:
+
+    redlens ci . --format sarif --fail-on review > redlens.sarif
+
+The first run on a repository that already has findings is where a scanner
+usually dies. Adopt it in two steps instead:
+
+    redlens ci . --save-baseline redlens-baseline.json    # records today, changes nothing
+    redlens ci . --baseline redlens-baseline.json --fail-on review
+
+The baseline is plain JSON keyed on (rule, file, line, occurrence), so it is
+reviewable in a pull request. Moving a finding to another line makes it new
+again - that is the documented contract, and re-saving the baseline is the
+deliberate act of accepting the new position.
 
 ## Cross-turn sessions
 

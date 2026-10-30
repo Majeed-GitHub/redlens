@@ -31,8 +31,10 @@ from .scanner import (
     worst,
 )
 from .audit_log import AuditLog, verify as verify_audit_log
+from .baseline import load_baseline, suppress, write_baseline
 from .evolution import evolve, load_jsonl
 from .policy import Policy, combine
+from .sarif import to_sarif_json
 from .session import ScanSession
 from .tool_call import scan_tool_call
 
@@ -88,7 +90,28 @@ def cmd_scan(args) -> int:
         )
     else:
         report = scan(text, target=args.target or (args.file or "input"), layer=args.layer)
-    if args.json:
+
+    save_baseline = getattr(args, "save_baseline", None)
+    if save_baseline:
+        written = write_baseline(save_baseline, [(report, text)], __version__)
+        print("baseline written: %s (%d fingerprint(s))" % (save_baseline, written), file=sys.stderr)
+
+    baseline_path = getattr(args, "baseline", None)
+    if baseline_path:
+        try:
+            fingerprints = load_baseline(baseline_path)
+        except ValueError as exc:
+            print(str(exc), file=sys.stderr)
+            return EXIT_ERROR
+        report, suppressed = suppress(report, fingerprints, text)
+        if suppressed:
+            print("suppressed %d known finding(s) from %s" % (suppressed, baseline_path),
+                  file=sys.stderr)
+
+    output_format = getattr(args, "format", None) or ("json" if args.json else "text")
+    if output_format == "sarif":
+        print(to_sarif_json([(report, text)], tool_version=__version__))
+    elif output_format == "json":
         print(report.to_json(indent=2))
     else:
         print(report.summary())
@@ -608,6 +631,108 @@ def cmd_serve(args) -> int:
     return serve(host=args.host, port=args.port, token=token, max_body=args.max_body_bytes)
 
 
+SCANNABLE_EXTENSIONS = (
+    ".txt", ".md", ".markdown", ".rst", ".json", ".jsonl", ".yaml", ".yml",
+    ".py", ".js", ".mjs", ".ts", ".tsx", ".jsx", ".html", ".htm", ".csv",
+    ".xml", ".toml", ".ini", ".cfg", ".env", ".sql", ".sh", ".ps1", ".java",
+    ".go", ".rb", ".php",
+)
+SKIP_DIRECTORIES = {
+    ".git", ".hg", ".svn", "node_modules", "__pycache__", ".venv", "venv",
+    "env", "dist", "build", ".mypy_cache", ".pytest_cache", ".ruff_cache",
+    ".tox", "site-packages",
+}
+MAX_SCANNED_FILE_BYTES = 1_000_000
+
+
+def _walk_targets(paths: List[str]) -> List[str]:
+    """Expand files and directories into a deterministic, filtered file list.
+
+    Determinism matters more than completeness here: a CI log that reorders
+    files between runs makes a new finding look like a fixed one.
+    """
+    found: List[str] = []
+    for path in paths:
+        if os.path.isdir(path):
+            for root, directories, filenames in os.walk(path):
+                directories[:] = sorted(d for d in directories if d not in SKIP_DIRECTORIES)
+                for filename in sorted(filenames):
+                    if filename.lower().endswith(SCANNABLE_EXTENSIONS):
+                        found.append(os.path.join(root, filename))
+        elif os.path.isfile(path):
+            found.append(path)
+        else:
+            print("skipped, not a file or directory: %s" % path, file=sys.stderr)
+    return sorted(found)
+
+
+def cmd_ci(args) -> int:
+    """Scan every file under the given paths and gate the build in one call.
+
+    This is the command a CI step and the composite action both use: one SARIF
+    log for the whole repository, an optional baseline so existing findings do
+    not fail a first adoption, and one exit code.
+    """
+    files = _walk_targets(args.paths)
+    if not files:
+        print("no scannable files under: %s" % " ".join(args.paths), file=sys.stderr)
+        return EXIT_CLEAN
+
+    entries = []
+    skipped: List[str] = []
+    for path in files:
+        try:
+            if os.path.getsize(path) > MAX_SCANNED_FILE_BYTES:
+                skipped.append(path)
+                continue
+            with open(path, "r", encoding="utf-8", errors="replace") as handle:
+                text = handle.read()
+        except OSError as exc:
+            print("cannot read %s: %s" % (path, exc), file=sys.stderr)
+            continue
+        entries.append((scan(text, target=path, layer=args.layer), text))
+
+    if args.save_baseline:
+        written = write_baseline(args.save_baseline, entries, __version__)
+        print("baseline written: %s (%d fingerprint(s))" % (args.save_baseline, written),
+              file=sys.stderr)
+
+    suppressed_total = 0
+    if args.baseline:
+        try:
+            fingerprints = load_baseline(args.baseline)
+        except ValueError as exc:
+            print(str(exc), file=sys.stderr)
+            return EXIT_ERROR
+        rescanned = []
+        for report, text in entries:
+            report, count = suppress(report, fingerprints, text)
+            suppressed_total += count
+            rescanned.append((report, text))
+        entries = rescanned
+        if suppressed_total:
+            print("suppressed %d known finding(s) from %s" % (suppressed_total, args.baseline),
+                  file=sys.stderr)
+
+    reported = [(report, text) for report, text in entries if report.findings]
+    if (args.format or "text") == "sarif":
+        print(to_sarif_json(entries, tool_version=__version__, base_dir=os.getcwd()))
+    else:
+        print("RedLens scan: %d file(s), %d with findings, %d skipped by size"
+              % (len(entries), len(reported), len(skipped)))
+        for report, _ in reported:
+            print("  " + report.summary().replace("\n", "\n  "))
+
+    if args.fail_on:
+        threshold = FAIL_ON_LEVELS[args.fail_on]
+        failing = [report for report, _ in entries if report.decision in threshold]
+        if failing:
+            print("FAIL: %d file(s) reached %s or above" % (len(failing), args.fail_on),
+                  file=sys.stderr)
+            return EXIT_FINDINGS
+    return EXIT_CLEAN
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="redlens",
@@ -632,6 +757,12 @@ def build_parser() -> argparse.ArgumentParser:
                              help="print the text extracted from hidden regions before the report")
     scan_parser.add_argument("--target", help="label used in the report")
     scan_parser.add_argument("--json", action="store_true", help="emit JSON instead of text")
+    scan_parser.add_argument("--format", choices=("text", "json", "sarif"), default=None,
+                             help="output format; sarif is what CI security tabs consume")
+    scan_parser.add_argument("--baseline", metavar="PATH",
+                             help="suppress findings already recorded in this baseline file")
+    scan_parser.add_argument("--save-baseline", metavar="PATH",
+                             help="record every current finding so future runs can suppress it")
     scan_parser.add_argument("--fail-on", choices=sorted(FAIL_ON_LEVELS),
                              help="exit 1 when the decision reaches this level")
     scan_parser.set_defaults(func=cmd_scan)
@@ -725,6 +856,18 @@ def build_parser() -> argparse.ArgumentParser:
     # several milliseconds under load, so the budget is deliberately generous.
     audit_parser.add_argument("--max-p99-ms", type=float, default=12.0)
     audit_parser.set_defaults(func=cmd_audit)
+
+    ci_parser = sub.add_parser("ci", help="scan many files and gate the build in one call")
+    ci_parser.add_argument("paths", nargs="+", help="files or directories to scan")
+    ci_parser.add_argument("--layer", default="retrieved",
+                           choices=["direct", "retrieved", "tool_output", "tool_definition"],
+                           help="where the content came from; repo content is retrieved by default")
+    ci_parser.add_argument("--format", choices=("text", "sarif"), default="text")
+    ci_parser.add_argument("--baseline", metavar="PATH", help="suppress findings recorded in this baseline")
+    ci_parser.add_argument("--save-baseline", metavar="PATH", help="record current findings as the baseline")
+    ci_parser.add_argument("--fail-on", choices=sorted(FAIL_ON_LEVELS),
+                           help="exit 1 when any scanned file reaches this decision")
+    ci_parser.set_defaults(func=cmd_ci)
     return parser
 
 
